@@ -1,9 +1,25 @@
 import { StyleSheet, Image } from 'react-native';
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 
 import EditScreenInfo from '@/components/EditScreenInfo';
 import { Text, View } from '@/components/Themed';
 
 export default function TabOneScreen() {
+  useEffect(() => {
+    // Simple call to verify the Supabase client works
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Supabase connection error:', error);
+        } else {
+          console.log('Supabase session data:', data);
+        }
+      })
+      .catch((err) => console.error('Unexpected Supabase error:', err));
+  }, []);
+
   return (
     <View style={styles.container}>
       <Image 
