@@ -1,24 +1,24 @@
 import React, { useEffect } from 'react';
 import { View, Switch, Text } from 'react-native';
 import { useColorScheme } from 'nativewind';
-import { MMKV } from 'react-native-mmkv';
+// import { MMKV } from 'react-native-mmkv'; // Disabled for Expo Go
 
-const storage = new MMKV();
+// const storage = new MMKV(); // Disabled for Expo Go
 
 export default function ThemeToggle() {
   const { colorScheme, setColorScheme } = useColorScheme();
 
   useEffect(() => {
-    const savedScheme = storage.getString('colorScheme');
-    if (savedScheme) {
-      setColorScheme(savedScheme as 'light' | 'dark');
-    }
+    // const savedScheme = storage.getString('colorScheme'); // Disabled for Expo Go
+    // if (savedScheme) {
+    //   setColorScheme(savedScheme as 'light' | 'dark');
+    // }
   }, []);
 
   const toggleScheme = () => {
     const newScheme = colorScheme === 'dark' ? 'light' : 'dark';
     setColorScheme(newScheme);
-    storage.set('colorScheme', newScheme);
+    // storage.set('colorScheme', newScheme); // Disabled for Expo Go
   };
 
   return (

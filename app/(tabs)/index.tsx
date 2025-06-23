@@ -1,57 +1,70 @@
-import { StyleSheet, Image } from 'react-native';
-import { useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { View, Text, TouchableOpacity } from 'react-native'
+import React, { useRef, useState, useEffect } from 'react'
+import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera'
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+import ShutterButton from '../../src/components/ShutterButton';
 
-import EditScreenInfo from '@/components/EditScreenInfo';
-import { Text, View } from '@/components/Themed';
+export default function CameraScreen() {
+  const device = useCameraDevice('back')
+  const { hasPermission, requestPermission } = useCameraPermission()
+  const [torch, setTorch] = useState<'on' | 'off'>('off')
+  const camera = useRef<Camera>(null)
 
-export default function TabOneScreen() {
   useEffect(() => {
-    // Simple call to verify the Supabase client works
-    supabase.auth
-      .getSession()
-      .then(({ data, error }) => {
-        if (error) {
-          console.error('Supabase connection error:', error);
-        } else {
-          console.log('Supabase session data:', data);
-        }
-      })
-      .catch((err) => console.error('Unexpected Supabase error:', err));
-  }, []);
+    if (!hasPermission) {
+      requestPermission()
+    }
+  }, [hasPermission])
+
+  if (!hasPermission) {
+    return <View style={{ flex: 1, backgroundColor: 'black' }} />;
+  }
+
+  if (device == null) return (
+    <View style={{ flex: 1, backgroundColor: 'black', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: 'white', fontSize: 24 }}>No camera device found</Text>
+    </View>
+  )
+
+  const handleShutterPress = async () => {
+    if (camera.current) {
+      try {
+        const photo = await camera.current.takePhoto();
+        console.log(photo.path);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
 
   return (
-    <View style={styles.container}>
-      <Image 
-        source={require('@/assets/images/gauntletai.png')} 
-        style={styles.logo}
-        resizeMode="contain"
+    <View style={{ flex: 1, backgroundColor: 'black' }}>
+      <Camera
+        ref={camera}
+        style={{ flex: 1 }}
+        device={device}
+        isActive={true}
+        photo={true}
+        torch={torch}
       />
-      <Text style={styles.title}>hello gauntlet</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <EditScreenInfo path="app/(tabs)/index.tsx" />
+      <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+        <View style={{ flex: 1, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: 16 }}>
+            {device.hasTorch && (
+                <TouchableOpacity 
+                  onPress={() => setTorch(t => t === 'on' ? 'off' : 'on')} 
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+                >
+                <Feather name={torch === 'on' ? 'zap' : 'zap-off'} size={24} color="white" />
+                </TouchableOpacity>
+            )}
+          </View>
+          <View style={{ alignItems: 'center', paddingBottom: 16 }}>
+            <ShutterButton onPress={handleShutterPress} isRecording={false} />
+          </View>
+        </View>
+      </SafeAreaView>
     </View>
-  );
+  )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: '80%',
-  },
-});
