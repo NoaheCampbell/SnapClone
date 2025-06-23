@@ -1,0 +1,5 @@
+componentFolder: "src/components"
+screenFolder: "src/app"
+importAliases:
+  "@/*": "./src/*"
+tailwind: true 
