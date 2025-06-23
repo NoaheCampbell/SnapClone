@@ -1,0 +1,31 @@
+# --- JS / RN defaults -------------------------------------------------
+node_modules/
+.expo/
+*.log
+
+# --- iOS --------------------------------------------------------------
+ios/Pods/                     # CocoaPods binaries (~300 MB)
+ios/build/
+ios/DerivedData/
+ios/SnapClone.xcworkspace/    # recreated by `pod install`
+ios/*.xcuserstate
+# xcassets are OK to commit; they’re checked in as PNG + JSON
+
+# --- Android ----------------------------------------------------------
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties      # contains your SDK path
+android/app/debug.keystore
+*.iml
+
+# --- IDE cruft --------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+
+# --- Secrets / misc ---------------------------------------------------
+.env
+*.keystore
+*.p8
+*.jks
