@@ -5,6 +5,8 @@ import { Feather } from '@expo/vector-icons';
 import { useNavigation, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
 
 export default function SendToModal() {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -111,14 +113,27 @@ export default function SendToModal() {
       // ---------------------------------------------------------
       const firstChannelId = Array.from(channelMap.values())[0];
       const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
-      console.log('[SendTo] Fetching photo data, ext', fileExt);
-      const arrayBuf = await fetch(uri).then(r => r.arrayBuffer());
+
+      // Map extension to appropriate MIME
+      const mimeMap: Record<string,string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+      };
+      const contentType = mimeMap[fileExt] || `image/${fileExt}`;
+      console.log('[SendTo] Fetching photo data, ext', fileExt, 'ctype', contentType);
+      // Read local file as base64 to avoid malformed fetch results on some platforms
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const arrayBuf = decode(base64);
       const path = `${firstChannelId}/${Date.now()}.${fileExt}`;
       console.log('[SendTo] Uploading to chat-media/', path);
 
       const { error: upErr } = await supabase.storage.from('chat-media').upload(path, arrayBuf as any, {
         cacheControl: '3600',
-        contentType: `image/${fileExt}`,
+        contentType,
       });
 
       if (upErr && upErr.message !== 'The resource already exists') {

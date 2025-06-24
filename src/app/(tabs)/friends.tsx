@@ -308,9 +308,11 @@ export default function FriendsScreen() {
             className="w-16 h-16 rounded-full"
           />
         ) : (
-          <Text className="text-white text-xl font-bold">
-            {item.friend_profile.display_name?.charAt(0) || item.friend_profile.username.charAt(0)}
-          </Text>
+          <Image 
+            source={require('../../../assets/images/avatar-placeholder.png')} 
+            className="w-16 h-16 rounded-full"
+            resizeMode="cover"
+          />
         )}
       </View>
       
@@ -344,9 +346,11 @@ export default function FriendsScreen() {
             className="w-16 h-16 rounded-full"
           />
         ) : (
-          <Text className="text-white text-xl font-bold">
-            {item.display_name?.charAt(0) || item.username.charAt(0)}
-          </Text>
+          <Image 
+            source={require('../../../assets/images/avatar-placeholder.png')} 
+            className="w-16 h-16 rounded-full"
+            resizeMode="cover"
+          />
         )}
       </View>
       
@@ -376,9 +380,11 @@ export default function FriendsScreen() {
               className="w-16 h-16 rounded-full"
             />
           ) : (
-            <Text className="text-white text-xl font-bold">
-              {item.from_profile.display_name?.charAt(0) || item.from_profile.username.charAt(0)}
-            </Text>
+            <Image 
+              source={require('../../../assets/images/avatar-placeholder.png')} 
+              className="w-16 h-16 rounded-full"
+              resizeMode="cover"
+            />
           )}
         </View>
         

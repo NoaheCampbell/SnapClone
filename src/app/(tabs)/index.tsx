@@ -394,7 +394,7 @@ export default function CameraScreen() {
     
     // Special handling for B&W to simulate grayscale
     if (selectedFilter.id === 'bw') {
-      console.log(`Applying B&W filter preview`);
+      // console.log(`Applying B&W filter preview`); // removed for production
       return (
         <View style={{ flex: 1 }}>
           <CameraView
@@ -435,7 +435,7 @@ export default function CameraScreen() {
 
     // Apply other overlays normally
     if (selectedFilter.overlayStyle) {
-      console.log(`Applying overlay for filter: ${selectedFilter.name}`, selectedFilter.overlayStyle);
+      // console.log(`Applying overlay for filter: ${selectedFilter.name}`, selectedFilter.overlayStyle); // removed for production
       
       return (
         <View style={{ flex: 1 }}>
