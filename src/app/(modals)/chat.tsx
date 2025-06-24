@@ -1,9 +1,13 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
+import * as ImagePicker from 'expo-image-picker'
+import { Video, ResizeMode } from 'expo-av'
+import { decode } from 'base64-arraybuffer'
+import * as FileSystem from 'expo-file-system'
 
 interface Message {
   id: number
@@ -12,6 +16,8 @@ interface Message {
   created_at: string
   sender_name: string
   is_own_message: boolean
+  media_url?: string
+  media_type?: string
 }
 
 export default function ChatScreen() {
@@ -20,6 +26,7 @@ export default function ChatScreen() {
   const [newMessage, setNewMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [chatTitle, setChatTitle] = useState('Chat')
   const flatListRef = useRef<FlatList>(null)
 
@@ -56,7 +63,8 @@ export default function ChatScreen() {
                 sender_id: newMessage.sender_id,
                 created_at: newMessage.created_at,
                 sender_name: profile?.username || 'Unknown',
-                is_own_message: newMessage.sender_id === user?.id
+                is_own_message: newMessage.sender_id === user?.id,
+                media_url: newMessage.media_url,
               }
             ])
           }
@@ -131,6 +139,68 @@ export default function ChatScreen() {
     }
   }
 
+  const pickAndSendMedia = async () => {
+    try {
+      // Ask for permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Need camera roll permission to send media')
+        return
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 0.7
+      })
+
+      if (result.canceled) return
+
+      setUploading(true)
+
+      const asset = result.assets[0]
+      const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg'
+      const fileType = asset.type ?? 'image'
+
+      const path = `${channelId}/${Date.now()}.${ext}`
+
+      // Read file as base64 and convert to ArrayBuffer (React Native method)
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+      
+      const arrayBuffer = decode(base64)
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('chat-media')
+        .upload(path, arrayBuffer, {
+          contentType: fileType.startsWith('video') ? 'video/mp4' : `image/${ext}`
+        })
+
+      if (uploadError) throw uploadError
+
+      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path)
+
+      const { data: user } = await supabase.auth.getUser()
+      if (!user.user) throw new Error('Not authenticated')
+
+      const { error: insertError } = await supabase
+        .from('messages')
+        .insert({
+          channel_id: channelId,
+          sender_id: user.user.id,
+          media_url: data.publicUrl,
+        })
+
+      if (insertError) throw insertError
+    } catch (err) {
+      console.error('Error sending media:', err)
+      Alert.alert('Upload failed', 'Could not send media')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp)
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -148,9 +218,27 @@ export default function ChatScreen() {
             {item.sender_name}
           </Text>
         )}
-        <Text className="text-white text-base">
-          {item.content}
-        </Text>
+
+        {/* Media rendering */}
+        {item.media_url ? (
+          /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
+            <Video
+              source={{ uri: item.media_url }}
+              style={{ width: 200, height: 200 }}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+            />
+          ) : (
+            <Image
+              source={{ uri: item.media_url }}
+              style={{ width: 200, height: 200, borderRadius: 8 }}
+            />
+          )
+        ) : (
+          <Text className="text-white text-base">
+            {item.content}
+          </Text>
+        )}
         <Text className={`text-xs mt-1 ${
           item.is_own_message ? 'text-blue-100' : 'text-gray-400'
         }`}>
@@ -234,6 +322,11 @@ export default function ChatScreen() {
 
         {/* Message Input */}
         <View className="flex-row items-center p-4 border-t border-gray-800">
+          {/* Media picker */}
+          <TouchableOpacity onPress={pickAndSendMedia} className="mr-3">
+            <Feather name="plus" size={22} color="white" />
+          </TouchableOpacity>
+
           <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-2 mr-3">
             <TextInput
               value={newMessage}
