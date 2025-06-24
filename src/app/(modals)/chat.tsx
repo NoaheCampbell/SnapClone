@@ -85,6 +85,41 @@ export default function ChatScreen() {
         .on(
           'postgres_changes',
           {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'messages'
+          },
+          (payload) => {
+            const deletedMessage = payload.old as any
+            
+            setMessages(currentMessages => {
+              // Check if this message exists in the current messages (using fresh state)
+              const messageExistsInChat = currentMessages.some(m => String(m.id) === String(deletedMessage.id))
+              
+              if (!messageExistsInChat) {
+                return currentMessages // Return unchanged
+              }
+              
+              // Filter out the deleted message
+              const filteredMessages = currentMessages.filter(m => {
+                const currentId = String(m.id)
+                const deletedId = String(deletedMessage.id)
+                return currentId !== deletedId
+              })
+              return filteredMessages
+            })
+            
+            // Also remove read receipts for the deleted message
+            setReceipts(prev => {
+              const newReceipts = { ...prev }
+              delete newReceipts[deletedMessage.id]
+              return newReceipts
+            })
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
             event: 'INSERT',
             schema: 'public',
             table: 'message_reads'
@@ -95,6 +130,30 @@ export default function ChatScreen() {
               ...prev,
               [readData.message_id]: [...(prev[readData.message_id] || []), readData.reader_id]
             }))
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'message_reads'
+          },
+          (payload) => {
+            const deletedRead = payload.old as any
+            setReceipts(prev => {
+              const newReceipts = { ...prev }
+              if (newReceipts[deletedRead.message_id]) {
+                newReceipts[deletedRead.message_id] = newReceipts[deletedRead.message_id].filter(
+                  readerId => readerId !== deletedRead.reader_id
+                )
+                // If no more readers for this message, remove the entry
+                if (newReceipts[deletedRead.message_id].length === 0) {
+                  delete newReceipts[deletedRead.message_id]
+                }
+              }
+              return newReceipts
+            })
           }
         )
         .subscribe()

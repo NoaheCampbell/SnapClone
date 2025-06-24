@@ -92,6 +92,19 @@ export default function InboxScreen() {
           },
           () => loadChats()
         )
+        // A message was deleted (e.g., by cron job) – refresh to update last message
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'messages',
+          },
+          () => {
+            console.log('Message deleted, refreshing chats')
+            loadChats()
+          }
+        )
         .subscribe()
     }
 
