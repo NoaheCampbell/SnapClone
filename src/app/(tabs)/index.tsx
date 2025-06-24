@@ -30,7 +30,6 @@ export default function CameraScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
 
   const [permission, requestPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
@@ -99,7 +98,6 @@ export default function CameraScreen() {
     const text = textOverlays.find(t => t.id === id);
     if (text) {
       console.log('Found text to edit:', text.text);
-      setEditingText(text.text);
       updateTextOverlay(id, { isEditing: true });
       setSelectedTextId(id);
     } else {
@@ -107,13 +105,30 @@ export default function CameraScreen() {
     }
   };
 
-  const finishEditingText = (id: string) => {
-    console.log('Finishing edit for id:', id, 'with text:', editingText);
+  const finishEditingText = (id: string, newText: string) => {
+    console.log('Finishing edit for id:', id, 'with text:', newText);
     updateTextOverlay(id, { 
-      text: editingText.trim() || 'Text', 
+      text: newText.trim() || 'Text', 
       isEditing: false 
     });
-    setEditingText('');
+    setSelectedTextId(null);
+  };
+
+  const dismissAllEditing = () => {
+    console.log('Dismissing all text editing');
+    setTextOverlays(textOverlays.map(text => {
+      if (text.isEditing) {
+        // Save the current text value before dismissing
+        const currentText = (text as any).currentEditText || text.text;
+        console.log('Saving text for', text.id, ':', currentText);
+        return { 
+          ...text, 
+          text: currentText.trim() || 'Text',
+          isEditing: false 
+        };
+      }
+      return text;
+    }));
     setSelectedTextId(null);
   };
 
@@ -198,6 +213,53 @@ export default function CameraScreen() {
     }
   };
 
+  // Separate component for editing to avoid re-renders
+  const EditableTextInput = ({ textOverlay }: { textOverlay: TextOverlay }) => {
+    const [localText, setLocalText] = useState(textOverlay.text);
+    
+    // Expose the current text value so parent can access it
+    React.useEffect(() => {
+      // Store current text in a ref that can be accessed by parent
+      (textOverlay as any).currentEditText = localText;
+    }, [localText, textOverlay]);
+
+    const handleFinish = () => {
+      finishEditingText(textOverlay.id, localText);
+    };
+
+    return (
+      <View
+        style={{
+          padding: 8,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          borderRadius: 8,
+          borderWidth: 2,
+          borderColor: '#007AFF',
+          minWidth: 100,
+        }}
+      >
+        <TextInput
+          value={localText}
+          onChangeText={setLocalText}
+          onBlur={handleFinish}
+          onSubmitEditing={handleFinish}
+          style={{
+            fontSize: textOverlay.fontSize,
+            color: textOverlay.color,
+            fontWeight: textOverlay.fontWeight,
+            textAlign: 'center',
+            minWidth: 60,
+          }}
+          autoFocus={true}
+          selectTextOnFocus={true}
+          multiline={false}
+          maxLength={100}
+          blurOnSubmit={true}
+        />
+      </View>
+    );
+  };
+
   const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
     const translateX = useSharedValue(0);
     const translateY = useSharedValue(0);
@@ -253,38 +315,7 @@ export default function CameraScreen() {
             },
           ]}
         >
-          <View
-            style={{
-              padding: 8,
-              backgroundColor: 'rgba(0,0,0,0.7)',
-              borderRadius: 8,
-              borderWidth: 2,
-              borderColor: '#007AFF',
-              minWidth: 100,
-            }}
-          >
-            <TextInput
-              value={editingText}
-              onChangeText={setEditingText}
-              onBlur={() => {
-                console.log('TextInput onBlur triggered');
-                finishEditingText(textOverlay.id);
-              }}
-              onSubmitEditing={() => finishEditingText(textOverlay.id)}
-              style={{
-                fontSize: textOverlay.fontSize,
-                color: textOverlay.color,
-                fontWeight: textOverlay.fontWeight,
-                textAlign: 'center',
-                minWidth: 60,
-              }}
-              autoFocus={true}
-              selectTextOnFocus={true}
-              multiline={false}
-              maxLength={100}
-              blurOnSubmit={true}
-            />
-          </View>
+          <EditableTextInput textOverlay={textOverlay} />
         </Animated.View>
       );
     }
@@ -331,12 +362,18 @@ export default function CameraScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: 'black' }}>
-      <CameraView 
-        ref={cameraRef}
+      <TouchableOpacity 
         style={{ flex: 1 }} 
-        facing={'back'}
-        enableTorch={torchOn}
-      />
+        activeOpacity={1}
+        onPress={dismissAllEditing}
+      >
+        <CameraView 
+          ref={cameraRef}
+          style={{ flex: 1 }} 
+          facing={'back'}
+          enableTorch={torchOn}
+        />
+      </TouchableOpacity>
       
       <SafeAreaView style={{ 
         position: 'absolute', 
