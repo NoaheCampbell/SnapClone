@@ -32,6 +32,12 @@ create table if not exists friend_requests (
 alter table friend_requests enable row level security;
 create policy "FriendRequests: requester or recipient" on friend_requests
   for select using ( auth.uid() in (from_id, to_id) );
+create policy "FriendRequests: users can send requests" on friend_requests
+  for insert with check ( auth.uid() = from_id );
+create policy "FriendRequests: recipient can update" on friend_requests
+  for update using ( auth.uid() = to_id );
+create policy "FriendRequests: requester can delete" on friend_requests
+  for delete using ( auth.uid() = from_id );
 
 -- friends
 create table if not exists friends (
@@ -43,6 +49,10 @@ create table if not exists friends (
 alter table friends enable row level security;
 create policy "Friends: either side sees link" on friends
   for select using ( auth.uid() in (user_id, friend_id) );
+create policy "Friends: users can add friends" on friends
+  for insert with check ( auth.uid() in (user_id, friend_id) );
+create policy "Friends: users can remove friends" on friends
+  for delete using ( auth.uid() in (user_id, friend_id) );
 
 -- snaps
 create table if not exists snaps (

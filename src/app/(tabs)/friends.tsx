@@ -44,8 +44,6 @@ export default function FriendsScreen() {
     if (user) {
       loadFriends()
       loadFriendRequests()
-      // Test profiles access
-      testProfilesAccess()
     }
   }, [user])
 
@@ -116,91 +114,6 @@ export default function FriendsScreen() {
     }
   }
 
-  const testProfilesAccess = async () => {
-    console.log('Testing profiles access...')
-    try {
-      // Check what RLS policies exist on the profiles table
-      console.log('Checking existing RLS policies...')
-      try {
-        const { data: policies, error: policiesError } = await supabase
-          .from('pg_policies')
-          .select('*')
-          .eq('tablename', 'profiles')
-          
-        console.log('Existing policies on profiles table:', policies)
-        console.log('Policies query error:', policiesError)
-      } catch (policiesErr) {
-        console.log('Could not query policies (expected):', policiesErr)
-      }
-
-      // Try to manually create the RLS policy
-      console.log('Attempting to create RLS policy manually...')
-      
-      try {
-        // This might work if we have the right permissions
-        const { data: policyData, error: policyError } = await supabase
-          .from('profiles')
-          .select('*')
-          .limit(0) // We don't want data, just to test if we can modify
-          
-        console.log('Policy test result:', policyData)
-        console.log('Policy test error:', policyError)
-      } catch (policyErr) {
-        console.log('Policy creation failed:', policyErr)
-      }
-
-      // Test 1: Basic profile query with limit
-      console.log('Test 1: Basic query with limit')
-      const { data: test1, error: error1 } = await supabase
-        .from('profiles')
-        .select('user_id, username, display_name')
-        .limit(10)
-
-      console.log('Test 1 result:', test1)
-      console.log('Test 1 error:', error1)
-      
-      // Test 2: Query without limit
-      console.log('Test 2: Query without limit')
-      const { data: test2, error: error2 } = await supabase
-        .from('profiles')
-        .select('user_id, username, display_name')
-
-      console.log('Test 2 result:', test2)
-      console.log('Test 2 error:', error2)
-      
-      // Test 3: Query with different select
-      console.log('Test 3: Query with *')
-      const { data: test3, error: error3 } = await supabase
-        .from('profiles')
-        .select('*')
-
-      console.log('Test 3 result:', test3)
-      console.log('Test 3 error:', error3)
-      
-      // Test 4: Our own profile
-      console.log('Test 4: Own profile')
-      const { data: ownProfile, error: ownError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user?.id)
-        .single()
-        
-      console.log('Own profile:', ownProfile)
-      console.log('Own profile error:', ownError)
-
-      // Test 5: Count total profiles
-      console.log('Test 5: Count all profiles')
-      const { count, error: countError } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true })
-
-      console.log('Total profiles count:', count)
-      console.log('Count error:', countError)
-    } catch (error) {
-      console.log('Test profiles access error:', error)
-    }
-  }
-
   const searchUsers = async (query: string) => {
     if (!query.trim() || !user) {
       setSearchResults([])
@@ -208,38 +121,15 @@ export default function FriendsScreen() {
     }
 
     setLoading(true)
-    console.log('Searching for:', query)
-    console.log('Current user:', user)
-    console.log('User ID:', user.id)
     
     try {
-      // Check current session
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-      console.log('Current session:', sessionData)
-      console.log('Session error:', sessionError)
-
-      // First, let's try a simple approach - get all profiles and filter locally
+      // Get all profiles and filter locally
       const { data: allProfiles, error } = await supabase
         .from('profiles')
         .select('*')
-        .neq('user_id', user.id)
-
-      console.log('All profiles:', allProfiles)
-      console.log('Error:', error)
-      console.log('Error details:', error?.message, error?.details, error?.hint)
 
       if (error) {
         console.error('Error fetching profiles:', error)
-        
-        // Try without the neq filter to see if that's the issue
-        console.log('Trying without user filter...')
-        const { data: allProfilesNoFilter, error: noFilterError } = await supabase
-          .from('profiles')
-          .select('*')
-        
-        console.log('All profiles (no filter):', allProfilesNoFilter)
-        console.log('No filter error:', noFilterError)
-        
         setSearchResults([])
         return
       }
@@ -247,16 +137,13 @@ export default function FriendsScreen() {
       if (allProfiles) {
         const searchTerm = query.trim().toLowerCase()
         const filtered = allProfiles
-          // Temporarily allow searching for your own profile for testing
-          // .filter(profile => profile.user_id !== user.id) // Filter out current user locally
+          .filter(profile => profile.user_id !== user.id) // Filter out current user
           .filter(profile => {
             const usernameMatch = profile.username?.toLowerCase().includes(searchTerm)
             const displayNameMatch = profile.display_name?.toLowerCase().includes(searchTerm)
-            console.log(`Checking ${profile.username}: username match=${usernameMatch}, display name match=${displayNameMatch}`)
             return usernameMatch || displayNameMatch
           })
         
-        console.log('Filtered results:', filtered)
         setSearchResults(filtered)
       } else {
         setSearchResults([])
