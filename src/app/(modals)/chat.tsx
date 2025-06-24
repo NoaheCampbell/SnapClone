@@ -29,6 +29,12 @@ export default function ChatScreen() {
   const [uploading, setUploading] = useState(false)
   const [chatTitle, setChatTitle] = useState('Chat')
   const flatListRef = useRef<FlatList>(null)
+  const [selectedMedia, setSelectedMedia] = useState<Array<{
+    id: string
+    uri: string
+    type: string
+    name: string
+  }>>([])
 
   useEffect(() => {
     if (channelId) {
@@ -113,34 +119,79 @@ export default function ChatScreen() {
   }
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || sending) return
+    if ((!newMessage.trim() && selectedMedia.length === 0) || sending) return
 
     try {
       setSending(true)
       const { data: user } = await supabase.auth.getUser()
       if (!user.user) return
 
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          channel_id: channelId,
-          sender_id: user.user.id,
-          content: newMessage.trim()
-        })
+      // Send text message if there's text
+      if (newMessage.trim()) {
+        const { error } = await supabase
+          .from('messages')
+          .insert({
+            channel_id: channelId,
+            sender_id: user.user.id,
+            content: newMessage,
+          })
+        if (error) throw error
+      }
 
-      if (error) throw error
+      // Send media messages
+      for (const media of selectedMedia) {
+        await uploadAndSendMedia(media, user.user.id)
+      }
 
       setNewMessage('')
-      // Messages will be updated via subscription
-    } catch (error) {
-      console.error('Error sending message:', error)
+      setSelectedMedia([])
+    } catch (err) {
+      console.error('Error sending message:', err)
     } finally {
       setSending(false)
     }
   }
 
-  const pickAndSendMedia = async () => {
+  const uploadAndSendMedia = async (media: any, userId: string) => {
+    const ext = media.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `${channelId}/${Date.now()}.${ext}`
+
+    // Read file as base64 and convert to ArrayBuffer
+    const base64 = await FileSystem.readAsStringAsync(media.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    })
+    
+    const arrayBuffer = decode(base64)
+
+    const { error: uploadError } = await supabase
+      .storage
+      .from('chat-media')
+      .upload(path, arrayBuffer, {
+        contentType: media.type.startsWith('video') ? 'video/mp4' : `image/${ext}`
+      })
+
+    if (uploadError) throw uploadError
+
+    const { data } = await supabase.storage.from('chat-media').getPublicUrl(path)
+
+    const { error: insertError } = await supabase
+      .from('messages')
+      .insert({
+        channel_id: channelId,
+        sender_id: userId,
+        media_url: data.publicUrl,
+      })
+
+    if (insertError) throw insertError
+  }
+
+  const pickMedia = async () => {
     try {
+      if (selectedMedia.length >= 3) {
+        Alert.alert('Limit reached', 'You can only attach up to 3 media files at once')
+        return
+      }
+
       // Ask for permission
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
       if (status !== 'granted') {
@@ -150,55 +201,31 @@ export default function ChatScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
-        quality: 0.7
+        quality: 0.7,
+        allowsMultipleSelection: false
       })
 
       if (result.canceled) return
 
-      setUploading(true)
-
       const asset = result.assets[0]
-      const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg'
       const fileType = asset.type ?? 'image'
+      const fileName = asset.fileName || `media_${Date.now()}.${asset.uri.split('.').pop()}`
 
-      const path = `${channelId}/${Date.now()}.${ext}`
-
-      // Read file as base64 and convert to ArrayBuffer (React Native method)
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      })
-      
-      const arrayBuffer = decode(base64)
-
-      const { error: uploadError } = await supabase
-        .storage
-        .from('chat-media')
-        .upload(path, arrayBuffer, {
-          contentType: fileType.startsWith('video') ? 'video/mp4' : `image/${ext}`
-        })
-
-      if (uploadError) throw uploadError
-
-      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path)
-
-      const { data: user } = await supabase.auth.getUser()
-      if (!user.user) throw new Error('Not authenticated')
-
-      const { error: insertError } = await supabase
-        .from('messages')
-        .insert({
-          channel_id: channelId,
-          sender_id: user.user.id,
-          media_url: data.publicUrl,
-        })
-
-      if (insertError) throw insertError
+      // Add to selected media
+      setSelectedMedia(prev => [...prev, {
+        id: Date.now().toString(),
+        uri: asset.uri,
+        type: fileType,
+        name: fileName
+      }])
     } catch (err) {
       console.error('Error sending media:', err)
       Alert.alert('Upload failed', 'Could not send media')
-    } finally {
-      setUploading(false)
     }
+  }
+
+  const removeMedia = (id: string) => {
+    setSelectedMedia(prev => prev.filter(item => item.id !== id))
   }
 
   const formatTime = (timestamp: string) => {
@@ -321,36 +348,68 @@ export default function ChatScreen() {
         />
 
         {/* Message Input */}
-        <View className="flex-row items-center p-4 border-t border-gray-800">
-          {/* Media picker */}
-          <TouchableOpacity onPress={pickAndSendMedia} className="mr-3">
-            <Feather name="plus" size={22} color="white" />
-          </TouchableOpacity>
+        <View className="border-t border-gray-800">
+          {/* Media Previews */}
+          {selectedMedia.length > 0 && (
+            <View className="px-4 pt-3 pb-2">
+              <View className="flex-row flex-wrap">
+                {selectedMedia.map((media) => (
+                  <View key={media.id} className="relative mr-2 mb-2">
+                    <View className="w-16 h-16 bg-gray-700 rounded-lg overflow-hidden">
+                      {media.type.startsWith('video') ? (
+                        <Video
+                          source={{ uri: media.uri }}
+                          style={{ width: 64, height: 64 }}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay={false}
+                        />
+                      ) : (
+                        <Image
+                          source={{ uri: media.uri }}
+                          style={{ width: 64, height: 64 }}
+                        />
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => removeMedia(media.id)}
+                      className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full items-center justify-center"
+                    >
+                      <Feather name="x" size={12} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
 
-          <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-2 mr-3">
-            <TextInput
-              value={newMessage}
-              onChangeText={setNewMessage}
-              placeholder="Type a message..."
-              placeholderTextColor="gray"
-              className="flex-1 text-white text-base"
-              multiline
-              maxLength={500}
-            />
+          {/* Input Row */}
+          <View className="flex-row items-center p-4">
+            {/* Media picker */}
+            <TouchableOpacity onPress={pickMedia} className="mr-3">
+              <Feather name="plus" size={22} color="white" />
+            </TouchableOpacity>
+
+            <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-2 mr-3">
+              <TextInput
+                value={newMessage}
+                onChangeText={setNewMessage}
+                placeholder="Type a message..."
+                placeholderTextColor="gray"
+                className="flex-1 text-white text-base"
+                multiline
+                maxLength={500}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={sendMessage}
+              disabled={(!newMessage.trim() && selectedMedia.length === 0) || sending}
+              className={`w-10 h-10 rounded-full items-center justify-center ${
+                (newMessage.trim() || selectedMedia.length > 0) && !sending ? 'bg-blue-500' : 'bg-gray-600'
+              }`}
+            >
+              <Feather name="send" size={18} color="white" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            onPress={sendMessage}
-            disabled={!newMessage.trim() || sending}
-            className={`w-10 h-10 rounded-full items-center justify-center ${
-              newMessage.trim() && !sending ? 'bg-blue-500' : 'bg-gray-600'
-            }`}
-          >
-            <Feather 
-              name={sending ? "clock" : "send"} 
-              size={20} 
-              color="white" 
-            />
-          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

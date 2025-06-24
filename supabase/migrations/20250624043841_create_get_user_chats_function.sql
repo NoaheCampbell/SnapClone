@@ -44,3 +44,43 @@ BEGIN
     ORDER BY (lm.message_data->>'created_at')::timestamptz DESC NULLS LAST;
 END;
 $$;
+
+-- Function to get messages for a specific chat/channel
+CREATE OR REPLACE FUNCTION get_chat_messages(p_channel_id uuid)
+RETURNS TABLE(
+    id bigint,
+    content text,
+    sender_id uuid,
+    created_at timestamptz,
+    sender_name text,
+    is_own_message boolean,
+    media_url text
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    -- Check if user is a member of this channel
+    IF NOT EXISTS (
+        SELECT 1 FROM channel_members 
+        WHERE channel_id = p_channel_id AND member_id = auth.uid()
+    ) THEN
+        RAISE EXCEPTION 'Access denied: User is not a member of this channel';
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        m.id,
+        m.content,
+        m.sender_id,
+        m.created_at,
+        p.username AS sender_name,
+        (m.sender_id = auth.uid()) AS is_own_message,
+        m.media_url
+    FROM messages m
+    JOIN profiles p ON m.sender_id = p.user_id
+    WHERE m.channel_id = p_channel_id
+    ORDER BY m.created_at ASC;
+END;
+$$;
