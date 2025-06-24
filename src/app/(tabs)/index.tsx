@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Alert, TextInput, Modal } from 'react-native'
+import { View, Text, TouchableOpacity, Alert, TextInput } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -6,8 +6,8 @@ import Constants from 'expo-constants';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
-import { PanGestureHandler, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { useAnimatedGestureHandler, useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
+import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, runOnJS, useAnimatedGestureHandler } from 'react-native-reanimated';
 
 // Check if running in Expo Go
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -20,6 +20,7 @@ interface TextOverlay {
   fontSize: number;
   color: string;
   fontWeight: 'normal' | 'bold';
+  isEditing: boolean;
 }
 
 export default function CameraScreen() {
@@ -27,10 +28,9 @@ export default function CameraScreen() {
   const [hasMediaLibraryPermission, setHasMediaLibraryPermission] = useState<boolean | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [showTextModal, setShowTextModal] = useState(false);
-  const [textInput, setTextInput] = useState('');
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
 
   const [permission, requestPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
@@ -71,26 +71,48 @@ export default function CameraScreen() {
   }, [permission?.status, mediaLibraryPermission?.status, requestPermission, requestMediaLibraryPermission]);
 
   const addTextOverlay = () => {
-    if (textInput.trim()) {
-      const newText: TextOverlay = {
-        id: Date.now().toString(),
-        text: textInput.trim(),
-        x: 200, // Center-ish position
-        y: 300,
-        fontSize: 24,
-        color: '#FFFFFF',
-        fontWeight: 'normal'
-      };
-      setTextOverlays([...textOverlays, newText]);
-      setTextInput('');
-      setShowTextModal(false);
-    }
+    console.log('Adding new text overlay');
+    const newText: TextOverlay = {
+      id: Date.now().toString(),
+      text: 'Text',
+      x: 200, // Center-ish position
+      y: 300,
+      fontSize: 24,
+      color: '#FFFFFF',
+      fontWeight: 'normal',
+      isEditing: false
+    };
+    console.log('New text overlay created:', newText);
+    setTextOverlays([...textOverlays, newText]);
+    setSelectedTextId(newText.id);
+    console.log('Text overlays after adding:', textOverlays.length + 1);
   };
 
   const updateTextOverlay = (id: string, updates: Partial<TextOverlay>) => {
     setTextOverlays(textOverlays.map(text => 
       text.id === id ? { ...text, ...updates } : text
     ));
+  };
+
+  const startEditingText = (id: string) => {
+    console.log('startEditingText called for id:', id);
+    const text = textOverlays.find(t => t.id === id);
+    if (text) {
+      console.log('Found text to edit:', text.text);
+      setEditingText(text.text);
+      updateTextOverlay(id, { isEditing: true });
+      setSelectedTextId(id);
+    } else {
+      console.log('Text not found for id:', id);
+    }
+  };
+
+  const finishEditingText = (id: string) => {
+    updateTextOverlay(id, { 
+      text: editingText.trim() || 'Text', 
+      isEditing: false 
+    });
+    setEditingText('');
   };
 
   const deleteTextOverlay = (id: string) => {
@@ -174,26 +196,38 @@ export default function CameraScreen() {
     }
   };
 
-  const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
-    const translateX = useSharedValue(textOverlay.x);
-    const translateY = useSharedValue(textOverlay.y);
+    const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
+    const translateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
 
-    const gestureHandler = useAnimatedGestureHandler({
-      onStart: (_, context: any) => {
-        context.startX = translateX.value;
-        context.startY = translateY.value;
-      },
-      onActive: (event, context: any) => {
-        translateX.value = context.startX + event.translationX;
-        translateY.value = context.startY + event.translationY;
-      },
-      onEnd: () => {
+    const panGesture = Gesture.Pan()
+      .onBegin((event) => {
+        console.log('Pan gesture began at:', event.x, event.y);
+      })
+      .onUpdate((event) => {
+        console.log('Pan gesture update - translation:', event.translationX, event.translationY);
+        translateX.value = event.translationX;
+        translateY.value = event.translationY;
+      })
+      .onEnd((event) => {
+        const { translationX, translationY } = event;
+        console.log('Pan gesture ended - final translation:', translationX, translationY);
+
         runOnJS(updateTextOverlay)(textOverlay.id, {
-          x: translateX.value,
-          y: translateY.value
+          x: textOverlay.x + translationX,
+          y: textOverlay.y + translationY,
         });
-      },
-    });
+
+        const isTap = Math.abs(translationX) < 5 && Math.abs(translationY) < 5;
+        console.log('Is tap detected:', isTap);
+        if (isTap) {
+          console.log('Starting edit for text overlay:', textOverlay.id);
+          runOnJS(startEditingText)(textOverlay.id);
+        }
+
+        translateX.value = 0;
+        translateY.value = 0;
+      });
 
     const animatedStyle = useAnimatedStyle(() => {
       return {
@@ -204,274 +238,268 @@ export default function CameraScreen() {
       };
     });
 
-    return (
-      <PanGestureHandler onGestureEvent={gestureHandler}>
-        <Animated.View style={[animatedStyle, { position: 'absolute' }]}>
-          <TouchableOpacity
-            onPress={() => setSelectedTextId(textOverlay.id)}
+    if (textOverlay.isEditing) {
+      return (
+        <Animated.View
+          style={[
+            animatedStyle,
+            {
+              position: 'absolute',
+              left: textOverlay.x,
+              top: textOverlay.y,
+            },
+          ]}
+        >
+          <View
             style={{
               padding: 8,
-              backgroundColor: selectedTextId === textOverlay.id ? 'rgba(255,255,255,0.2)' : 'transparent',
-              borderRadius: 4,
-              borderWidth: selectedTextId === textOverlay.id ? 1 : 0,
-              borderColor: 'rgba(255,255,255,0.5)',
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              borderRadius: 8,
+              borderWidth: 2,
+              borderColor: '#007AFF',
+              minWidth: 100,
             }}
           >
-            <Text
+            <TextInput
+              value={editingText}
+              onChangeText={setEditingText}
+              onBlur={() => finishEditingText(textOverlay.id)}
+              onSubmitEditing={() => finishEditingText(textOverlay.id)}
               style={{
                 fontSize: textOverlay.fontSize,
                 color: textOverlay.color,
                 fontWeight: textOverlay.fontWeight,
-                textShadowColor: 'rgba(0,0,0,0.8)',
-                textShadowOffset: { width: 1, height: 1 },
-                textShadowRadius: 2,
+                textAlign: 'center',
+                minWidth: 60,
+              }}
+              autoFocus={true}
+              selectTextOnFocus={true}
+              multiline={false}
+              maxLength={100}
+            />
+          </View>
+        </Animated.View>
+      );
+    }
+
+          return (
+        <GestureDetector gesture={panGesture}>
+          <Animated.View
+            style={[
+              animatedStyle,
+              {
+                position: 'absolute',
+                left: textOverlay.x,
+                top: textOverlay.y,
+              },
+            ]}
+          >
+            <View
+              style={{
+                padding: 8,
+                backgroundColor:
+                  selectedTextId === textOverlay.id ? 'rgba(255,255,255,0.2)' : 'transparent',
+                borderRadius: 4,
+                borderWidth: selectedTextId === textOverlay.id ? 1 : 0,
+                borderColor: 'rgba(255,255,255,0.5)',
               }}
             >
-              {textOverlay.text}
-            </Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </PanGestureHandler>
-    );
+              <Text
+                style={{
+                  fontSize: textOverlay.fontSize,
+                  color: textOverlay.color,
+                  fontWeight: textOverlay.fontWeight,
+                  textShadowColor: 'rgba(0,0,0,0.8)',
+                  textShadowOffset: { width: 1, height: 1 },
+                  textShadowRadius: 2,
+                }}
+              >
+                {textOverlay.text}
+              </Text>
+            </View>
+          </Animated.View>
+        </GestureDetector>
+      );
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={{ flex: 1, backgroundColor: 'black' }}>
-        <CameraView 
-          ref={cameraRef}
-          style={{ flex: 1 }} 
-          facing={'back'}
-          enableTorch={torchOn}
-        />
-        
+    <View style={{ flex: 1, backgroundColor: 'black' }}>
+      <CameraView 
+        ref={cameraRef}
+        style={{ flex: 1 }} 
+        facing={'back'}
+        enableTorch={torchOn}
+      />
+      
+      <SafeAreaView style={{ 
+        position: 'absolute', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        bottom: 0,
+        pointerEvents: 'box-none'
+      }}>
         {/* Text Overlays */}
-        {textOverlays.map((textOverlay) => (
-          <DraggableText key={textOverlay.id} textOverlay={textOverlay} />
-        ))}
+        {textOverlays.map((textOverlay) => {
+          console.log('Rendering text overlay:', textOverlay.text, 'at position:', textOverlay.x, textOverlay.y);
+          return <DraggableText key={textOverlay.id} textOverlay={textOverlay} />;
+        })}
 
-        <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-          <View style={{ flex: 1, justifyContent: 'space-between' }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
-              {/* Settings Button */}
-              <TouchableOpacity 
-                onPress={() => router.push('/(modals)/settings')}
-                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
-              >
-                <Feather name="settings" size={24} color="white" />
-              </TouchableOpacity>
-              
-              {/* Flash Toggle */}
-              <TouchableOpacity 
-                onPress={() => setTorchOn(!torchOn)} 
-                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
-              >
-                <Feather name={torchOn ? 'zap' : 'zap-off'} size={24} color="white" />
-              </TouchableOpacity>
-            </View>
+        <View style={{ flex: 1, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
+            {/* Settings Button */}
+            <TouchableOpacity 
+              onPress={() => router.push('/(modals)/settings')}
+              style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+            >
+              <Feather name="settings" size={24} color="white" />
+            </TouchableOpacity>
+            
+            {/* Flash Toggle */}
+            <TouchableOpacity 
+              onPress={() => setTorchOn(!torchOn)} 
+              style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+            >
+              <Feather name={torchOn ? 'zap' : 'zap-off'} size={24} color="white" />
+            </TouchableOpacity>
+          </View>
 
-            {/* Text Controls */}
-            {textOverlays.length > 0 && (
-              <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8 }}>
-                  <TouchableOpacity
-                    onPress={clearAllText}
-                    style={{ backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
-                  >
-                    <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Clear All</Text>
-                  </TouchableOpacity>
-                  
-                  {selectedTextId && (
-                    <>
-                      <TouchableOpacity
-                        onPress={() => deleteTextOverlay(selectedTextId)}
-                        style={{ backgroundColor: 'rgba(255,100,100,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Delete</Text>
-                      </TouchableOpacity>
-                      
-                      {/* Font Size Controls */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text && text.fontSize > 12) {
-                            updateTextOverlay(selectedTextId, { fontSize: text.fontSize - 2 });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A-</Text>
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text && text.fontSize < 48) {
-                            updateTextOverlay(selectedTextId, { fontSize: text.fontSize + 2 });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A+</Text>
-                      </TouchableOpacity>
-                      
-                      {/* Bold Toggle */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text) {
-                            updateTextOverlay(selectedTextId, { 
-                              fontWeight: text.fontWeight === 'bold' ? 'normal' : 'bold' 
-                            });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>B</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
+          {/* Text Controls */}
+          {textOverlays.length > 0 && (
+            <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={clearAllText}
+                  style={{ backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
+                >
+                  <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Clear All</Text>
+                </TouchableOpacity>
                 
-                {/* Color Picker for Selected Text */}
                 {selectedTextId && (
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 8 }}>
-                    {textColors.map((color) => (
-                      <TouchableOpacity
-                        key={color}
-                        onPress={() => updateTextOverlay(selectedTextId, { color })}
-                        style={{
-                          width: 24,
-                          height: 24,
-                          backgroundColor: color,
-                          borderRadius: 12,
-                          borderWidth: 2,
-                          borderColor: textOverlays.find(t => t.id === selectedTextId)?.color === color ? '#FFD700' : 'rgba(255,255,255,0.5)',
-                        }}
-                      />
-                    ))}
-                  </View>
+                  <>
+                    <TouchableOpacity
+                      onPress={() => deleteTextOverlay(selectedTextId)}
+                      style={{ backgroundColor: 'rgba(255,100,100,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Delete</Text>
+                    </TouchableOpacity>
+                    
+
+                    
+                    {/* Font Size Controls */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const text = textOverlays.find(t => t.id === selectedTextId);
+                        if (text && text.fontSize > 12) {
+                          updateTextOverlay(selectedTextId, { fontSize: text.fontSize - 2 });
+                        }
+                      }}
+                      style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A-</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => {
+                        const text = textOverlays.find(t => t.id === selectedTextId);
+                        if (text && text.fontSize < 48) {
+                          updateTextOverlay(selectedTextId, { fontSize: text.fontSize + 2 });
+                        }
+                      }}
+                      style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A+</Text>
+                    </TouchableOpacity>
+                    
+                    {/* Bold Toggle */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const text = textOverlays.find(t => t.id === selectedTextId);
+                        if (text) {
+                          updateTextOverlay(selectedTextId, { 
+                            fontWeight: text.fontWeight === 'bold' ? 'normal' : 'bold' 
+                          });
+                        }
+                      }}
+                      style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>B</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
-            )}
-
-            {/* Bottom Controls */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16 }}>
-              {/* Text Button */}
-              <TouchableOpacity
-                onPress={() => setShowTextModal(true)}
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  borderRadius: 25,
-                  padding: 12,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Feather name="type" size={24} color="white" />
-              </TouchableOpacity>
-
-              {/* Shutter Button */}
-              <TouchableOpacity 
-                onPress={handleTakePhoto}
-                disabled={isCapturing}
-                style={{
-                  width: 70,
-                  height: 70,
-                  borderRadius: 35,
-                  backgroundColor: isCapturing ? 'gray' : 'white',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: isCapturing ? 0.7 : 1
-                }}
-              >
-                {isCapturing ? (
-                  <Feather name="camera" size={24} color="black" />
-                ) : (
-                  <View style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: 30,
-                    backgroundColor: 'white',
-                    borderWidth: 3,
-                    borderColor: 'black'
-                  }} />
-                )}
-              </TouchableOpacity>
-
-              {/* Placeholder for symmetry */}
-              <View style={{ width: 48 }} />
-            </View>
-          </View>
-        </SafeAreaView>
-
-        {/* Text Input Modal */}
-        <Modal
-          visible={showTextModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          transparent={true}
-        >
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#1a1a1a', borderRadius: 20, padding: 24, width: '90%', maxWidth: 400 }}>
-              <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' }}>
-                Add Text
-              </Text>
               
-              <TextInput
-                value={textInput}
-                onChangeText={setTextInput}
-                placeholder="Enter your text..."
-                placeholderTextColor="gray"
-                style={{
-                  backgroundColor: '#333',
-                  color: 'white',
-                  borderRadius: 12,
-                  padding: 16,
-                  fontSize: 16,
-                  marginBottom: 20,
-                  textAlign: 'center'
-                }}
-                autoFocus={true}
-                multiline={false}
-                maxLength={100}
-              />
-              
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowTextModal(false);
-                    setTextInput('');
-                  }}
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#666',
-                    borderRadius: 12,
-                    padding: 16,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Cancel</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  onPress={addTextOverlay}
-                  disabled={!textInput.trim()}
-                  style={{
-                    flex: 1,
-                    backgroundColor: textInput.trim() ? '#007AFF' : '#666',
-                    borderRadius: 12,
-                    padding: 16,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Add Text</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Color Picker for Selected Text */}
+              {selectedTextId && (
+                <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 8 }}>
+                  {textColors.map((color) => (
+                    <TouchableOpacity
+                      key={color}
+                      onPress={() => updateTextOverlay(selectedTextId, { color })}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        backgroundColor: color,
+                        borderRadius: 12,
+                        borderWidth: 2,
+                        borderColor: textOverlays.find(t => t.id === selectedTextId)?.color === color ? '#FFD700' : 'rgba(255,255,255,0.5)',
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
+          )}
+
+          {/* Bottom Controls */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16 }}>
+            {/* Text Button */}
+            <TouchableOpacity
+              onPress={addTextOverlay}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                borderRadius: 25,
+                padding: 12,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Feather name="type" size={24} color="white" />
+            </TouchableOpacity>
+
+            {/* Shutter Button */}
+            <TouchableOpacity 
+              onPress={handleTakePhoto}
+              disabled={isCapturing}
+              style={{
+                width: 70,
+                height: 70,
+                borderRadius: 35,
+                backgroundColor: isCapturing ? 'gray' : 'white',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isCapturing ? 0.7 : 1
+              }}
+            >
+              {isCapturing ? (
+                <Feather name="camera" size={24} color="black" />
+              ) : (
+                <View style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 30,
+                  backgroundColor: 'white',
+                  borderWidth: 3,
+                  borderColor: 'black'
+                }} />
+              )}
+            </TouchableOpacity>
+
+            {/* Placeholder for symmetry */}
+            <View style={{ width: 48 }} />
           </View>
-        </Modal>
-      </View>
-    </GestureHandlerRootView>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 } 
