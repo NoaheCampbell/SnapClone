@@ -1,228 +1,200 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, TextInput } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
+import { useEffect, useState, useCallback } from 'react';
+import { FlatList, Image, Pressable, View, Text, ActivityIndicator } from 'react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../../lib/supabase';
+import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 
-interface TextOverlay {
+interface StoryRow {
   id: string;
-  text: string;
-  x: number;
-  y: number;
-  fontSize: number;
-  color: string;
-  fontWeight: 'normal' | 'bold';
-  isEditing: boolean;
+  user_id: string;
+  media_url: string;
+  created_at: string;
+  seen_by: string[] | null;
+  profiles: {
+    username: string;
+    avatar_url: string | null;
+  } | null;
 }
 
-export default function StoriesScreen() {
-  const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
-  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
+interface UserLatestStory {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  latest_story_id: string;
+  unseen: boolean;
+}
 
-  const addTextOverlay = () => {
-    console.log('Adding new text overlay');
-    const newText: TextOverlay = {
-      id: Date.now().toString(),
-      text: 'Test Text',
-      x: 150,
-      y: 200,
-      fontSize: 24,
-      color: '#000000',
-      fontWeight: 'normal',
-      isEditing: false
-    };
-    setTextOverlays([...textOverlays, newText]);
-    setSelectedTextId(newText.id);
-  };
+export default function StoriesTab() {
+  const { user } = useAuth();
+  const [items, setItems] = useState<UserLatestStory[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const updateTextOverlay = (id: string, updates: Partial<TextOverlay>) => {
-    setTextOverlays(textOverlays.map(text => 
-      text.id === id ? { ...text, ...updates } : text
-    ));
-  };
+  const loadStories = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('stories')
+      .select('id,user_id,media_url,created_at,seen_by,profiles(username,avatar_url)')
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false });
 
-  const startEditingText = (id: string) => {
-    console.log('startEditingText called for id:', id);
-    const text = textOverlays.find(t => t.id === id);
-    if (text) {
-      console.log('Found text to edit:', text.text);
-      setEditingText(text.text);
-      updateTextOverlay(id, { isEditing: true });
-      setSelectedTextId(id);
+    if (error) {
+      console.warn('Error fetching stories', error);
+      setLoading(false);
+      return;
     }
-  };
 
-  const finishEditingText = (id: string) => {
-    updateTextOverlay(id, { 
-      text: editingText.trim() || 'Test Text', 
-      isEditing: false 
+    const map = new Map<string, StoryRow>();
+    ((data ?? []) as any[]).forEach((raw) => {
+      const row = raw as StoryRow;
+      if (!map.has(row.user_id)) {
+        map.set(row.user_id, row);
+      }
     });
-    setEditingText('');
-  };
 
-  const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
-    const translateX = useSharedValue(0);
-    const translateY = useSharedValue(0);
+    const list: UserLatestStory[] = Array.from(map.values()).map(row => ({
+      user_id: row.user_id,
+      username: row.profiles?.username ?? 'User',
+      avatar_url: row.profiles?.avatar_url ?? null,
+      latest_story_id: row.id,
+      unseen: !(row.seen_by ?? []).includes(user.id),
+    }));
 
-    const panGesture = Gesture.Pan()
-      .onBegin((event) => {
-        console.log('Pan gesture began at:', event.x, event.y);
-      })
-      .onUpdate((event) => {
-        console.log('Pan gesture update - translation:', event.translationX, event.translationY);
-        translateX.value = event.translationX;
-        translateY.value = event.translationY;
-      })
-      .onEnd((event) => {
-        const { translationX, translationY } = event;
-        console.log('Pan gesture ended - final translation:', translationX, translationY);
+    // Put current user first
+    list.sort((a, b) => (a.user_id === user.id ? -1 : b.user_id === user.id ? 1 : 0));
 
-        runOnJS(updateTextOverlay)(textOverlay.id, {
-          x: textOverlay.x + translationX,
-          y: textOverlay.y + translationY,
-        });
+    setItems(list);
+    setLoading(false);
+  }, [user]);
 
-        const isTap = Math.abs(translationX) < 5 && Math.abs(translationY) < 5;
-        console.log('Is tap detected:', isTap);
-        if (isTap) {
-          console.log('Starting edit for text overlay:', textOverlay.id);
-          runOnJS(startEditingText)(textOverlay.id);
-        }
+  // Add new story from gallery (dev helper)
+  const addStoryFromGallery = useCallback(async () => {
+    if (!user) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
 
-        translateX.value = 0;
-        translateY.value = 0;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.9,
+    });
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    const fileUri = asset.uri;
+    const fileExt = fileUri.split('.').pop()?.toLowerCase() || 'jpg';
+    const mediaType = asset.type === 'video' ? 'video' : 'image';
+
+    try {
+      // Read file data as base64
+      const base64 = await fetch(fileUri).then(r => r.arrayBuffer());
+      const path = `${user.id}/${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('stories').upload(path, base64 as any, {
+        cacheControl: '3600',
+        contentType: asset.mimeType || (mediaType === 'image' ? `image/${fileExt}` : 'video/mp4'),
       });
+      if (uploadError && uploadError.message !== 'The resource already exists') {
+        console.warn('upload error', uploadError);
+        return;
+      }
 
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        transform: [
-          { translateX: translateX.value },
-          { translateY: translateY.value },
-        ],
-      };
-    });
+      const { data: { publicUrl } } = supabase.storage.from('stories').getPublicUrl(path);
 
-    if (textOverlay.isEditing) {
-      return (
-        <Animated.View
-          style={[
-            animatedStyle,
-            {
-              position: 'absolute',
-              left: textOverlay.x,
-              top: textOverlay.y,
-            },
-          ]}
-        >
-          <View
-            style={{
-              padding: 8,
-              backgroundColor: 'rgba(255,255,255,0.9)',
-              borderRadius: 8,
-              borderWidth: 2,
-              borderColor: '#007AFF',
-              minWidth: 100,
-            }}
-          >
-            <TextInput
-              value={editingText}
-              onChangeText={setEditingText}
-              onBlur={() => finishEditingText(textOverlay.id)}
-              onSubmitEditing={() => finishEditingText(textOverlay.id)}
-              style={{
-                fontSize: textOverlay.fontSize,
-                color: textOverlay.color,
-                fontWeight: textOverlay.fontWeight,
-                textAlign: 'center',
-                minWidth: 60,
-              }}
-              autoFocus={true}
-              selectTextOnFocus={true}
-            />
-          </View>
-        </Animated.View>
-      );
+      const { error: insertErr } = await supabase.from('stories').insert({
+        user_id: user.id,
+        media_url: publicUrl,
+        media_type: mediaType,
+      });
+      if (insertErr) {
+        console.warn('insert error', insertErr);
+        return;
+      }
+
+      loadStories();
+    } catch (e) {
+      console.warn('add story error', e);
     }
+  }, [user, loadStories]);
 
+  useEffect(() => {
+    loadStories();
+  }, [loadStories]);
+
+  if (!user) {
     return (
-      <GestureDetector gesture={panGesture}>
-        <Animated.View
-          style={[
-            animatedStyle,
-            {
-              position: 'absolute',
-              left: textOverlay.x,
-              top: textOverlay.y,
-            },
-          ]}
-        >
-          <View
-            style={{
-              padding: 8,
-              backgroundColor: selectedTextId === textOverlay.id ? 'rgba(0,0,255,0.2)' : 'rgba(255,255,255,0.1)',
-              borderRadius: 4,
-              borderWidth: selectedTextId === textOverlay.id ? 2 : 0,
-              borderColor: '#007AFF',
-            }}
-          >
-            <Text
-              style={{
-                fontSize: textOverlay.fontSize,
-                color: textOverlay.color,
-                fontWeight: textOverlay.fontWeight,
-              }}
-            >
-              {textOverlay.text}
-            </Text>
-          </View>
-        </Animated.View>
-      </GestureDetector>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Text>Please log in</Text>
+      </View>
     );
-  };
+  }
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const renderItem = ({ item }: { item: UserLatestStory }) => (
+    <Pressable
+      onPress={() => router.push(`/stories/${item.user_id}` as any)}
+      style={{ marginHorizontal: 8, alignItems: 'center' }}
+    >
+      <View
+        style={{
+          width: 68,
+          height: 68,
+          borderRadius: 34,
+          padding: 3,
+          backgroundColor: item.unseen ? '#3399ff' : '#cccccc',
+        }}
+      >
+        <Image
+          source={ item.avatar_url ? { uri: item.avatar_url } : require('../../../assets/images/avatar-placeholder.png') }
+          style={{ width: '100%', height: '100%', borderRadius: 34 }}
+          resizeMode="cover"
+        />
+      </View>
+      <Text style={{ marginTop: 4, fontSize: 12, color: '#000' }} numberOfLines={1}>
+        {item.user_id === user.id ? 'Your Story' : item.username}
+      </Text>
+    </Pressable>
+  );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 24, textAlign: 'center', margin: 20, color: 'black' }}>
-          Text Overlay Test
-        </Text>
-        
-        {/* Test background area */}
-        <View 
-          style={{ 
-            flex: 1, 
-            backgroundColor: '#f0f0f0', 
-            margin: 20, 
-            borderRadius: 10,
-            position: 'relative'
-          }}
-          onTouchStart={(event) => {
-            console.log('Background touched at:', event.nativeEvent.locationX, event.nativeEvent.locationY);
-          }}
-        >
-          {/* Render text overlays */}
-          {textOverlays.map((textOverlay) => (
-            <DraggableText key={textOverlay.id} textOverlay={textOverlay} />
-          ))}
-        </View>
-        
-        {/* Add text button */}
-        <TouchableOpacity
-          onPress={addTextOverlay}
-          style={{
-            backgroundColor: '#007AFF',
-            padding: 15,
-            margin: 20,
-            borderRadius: 10,
-            alignItems: 'center'
-          }}
-        >
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
-            Add Text Overlay
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      <FlatList
+        data={items}
+        keyExtractor={(i) => i.user_id}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingVertical: 16, paddingHorizontal: 8, paddingRight: 120 }}
+        renderItem={renderItem}
+        refreshing={loading}
+        onRefresh={loadStories}
+      />
+
+      {/* Floating add button */}
+      <Pressable
+        onPress={addStoryFromGallery}
+        style={{
+          position: 'absolute',
+          right: 20,
+          bottom: 90,
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: '#3399ff',
+          alignItems: 'center',
+          justifyContent: 'center',
+          elevation: 5,
+          zIndex: 2,
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 32, lineHeight: 32 }}>+</Text>
+      </Pressable>
+    </View>
   );
 }
