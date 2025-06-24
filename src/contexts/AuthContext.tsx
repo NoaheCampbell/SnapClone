@@ -82,7 +82,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return
       }
       
-      console.log('Initial session:', !!session?.user)
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
@@ -98,7 +97,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event, !!session?.user)
         setSession(session)
         setUser(session?.user ?? null)
         
@@ -136,7 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadProfile = async (userId: string, retryCount = 0) => {
     // Prevent duplicate loading attempts
     if (profileLoading) {
-      console.log('Profile loading already in progress, skipping...')
       return
     }
 
@@ -145,8 +142,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true)
     
     try {
-      console.log(`Loading profile for user: ${userId} (attempt ${retryCount + 1})`)
-      
       // Add timeout to profile loading - longer timeout for better reliability
       const profilePromise = supabase
         .from('profiles')
@@ -163,18 +158,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         if (error.code === 'PGRST116') {
           // No profile found - this is expected for new users
-          console.log('No profile found for user - will need to create one')
           setProfile(null)
           setLoading(false) // Only set loading false when we have definitive result
         } else if (error.message === 'Profile loading timeout' && retryCount < 2) {
           // Retry up to 2 times for timeouts
-          console.log(`Profile loading timed out, retrying... (${retryCount + 1}/2)`)
           setProfileLoading(false) // Reset flag before retry
           // Don't set loading to false - keep trying
           setTimeout(() => loadProfile(userId, retryCount + 1), 1000)
           return // Don't set loading to false yet
         } else if (error.message === 'Profile loading timeout') {
-          console.log('Profile loading timed out after retries - treating as no profile')
           setProfile(null)
           setLoading(false)
         } else {
@@ -183,11 +175,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false)
         }
       } else if (data) {
-        console.log('Profile loaded successfully:', data)
         setProfile(data)
         setLoading(false)
       } else {
-        console.log('No profile data returned')
         setProfile(null)
         setLoading(false)
       }
@@ -201,14 +191,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string) => {
-    // Use hardcoded deep link URL for email confirmation
-    const redirectUrl = 'snapclone://auth/login'
-    
+    // Use a simple redirect URL that works for development
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: redirectUrl,
+        emailRedirectTo: 'https://app.supabase.com'
       }
     })
     return { error }
@@ -216,8 +204,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
-      console.log('Attempting to sign in with email:', email)
-      
       // Add timeout to prevent hanging
       const signInPromise = supabase.auth.signInWithPassword({
         email,
@@ -230,12 +216,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       const result = await Promise.race([signInPromise, timeoutPromise])
       const { data, error } = result as any
-      
-      if (error) {
-        console.error('Sign in error:', error)
-      } else {
-        console.log('Sign in successful')
-      }
       
       return { error }
     } catch (error) {
@@ -255,11 +235,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const createProfile = async (username: string, displayName?: string) => {
     if (!user) {
-      console.error('No user found when creating profile')
       return { error: 'No user found' }
     }
-
-    console.log('Creating profile for user:', user.id, 'with username:', username)
 
     try {
       const { data, error } = await supabase
@@ -273,18 +250,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
 
       if (error) {
-        console.error('Profile creation failed:', error)
         return { error }
       } else if (data) {
-        console.log('Profile created successfully:', data)
         setProfile(data)
         return { error: null }
       } else {
-        console.error('No data returned from profile creation')
         return { error: 'No data returned' }
       }
     } catch (error) {
-      console.error('Unexpected error creating profile:', error)
       return { error }
     }
   }
@@ -307,14 +280,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const resendConfirmation = async (email: string) => {
-    // Use hardcoded deep link URL for email confirmation
-    const redirectUrl = 'snapclone://auth/login'
-    
+    // Use a simple redirect URL that works for development
     const { data, error } = await supabase.auth.resend({
       type: 'signup',
       email: email,
       options: {
-        emailRedirectTo: redirectUrl,
+        emailRedirectTo: 'https://app.supabase.com'
       }
     })
     return { error }

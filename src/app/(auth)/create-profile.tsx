@@ -31,18 +31,15 @@ export default function CreateProfileScreen() {
     setLoading(true)
     
     try {
-      console.log('Creating profile with username:', username.trim())
       const { error } = await createProfile(username.trim(), displayName.trim() || undefined)
 
       if (error) {
-        console.error('Profile creation error:', error)
         if (error.code === '23505') {
           Alert.alert('Username Taken', 'This username is already taken. Please choose another one.')
         } else {
           Alert.alert('Error', error.message || 'Failed to create profile')
         }
       } else {
-        console.log('Profile created successfully - navigating to main app')
         // Small delay to ensure profile state updates
         setTimeout(() => {
           router.replace('/')

@@ -23,13 +23,11 @@ export default function LoginScreen() {
 
   const testConnection = async () => {
     try {
-      console.log('Testing Supabase connection...')
       const { data, error } = await supabase.from('profiles').select('count').limit(1)
       if (error) {
         console.error('Connection test failed:', error)
         Alert.alert('Connection Test', `Failed: ${error.message}`)
       } else {
-        console.log('Connection test successful')
         Alert.alert('Connection Test', 'Success! Database is reachable.')
       }
     } catch (error) {
@@ -47,18 +45,13 @@ export default function LoginScreen() {
     setLoading(true)
     
     try {
-      console.log('Starting login process...')
-      
       const { error } = await signIn(email.trim(), password)
 
       if (error) {
-        console.error('Login failed with error:', error)
         Alert.alert('Login Failed', error.message || 'Unknown error occurred')
       } else {
-        console.log('Login completed successfully - waiting for auth state update')
         // Small delay to ensure auth state updates
         setTimeout(() => {
-          console.log('Navigating to index screen')
           router.replace('/')
         }, 500)
       }

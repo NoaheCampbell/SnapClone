@@ -18,6 +18,8 @@ alter table profiles enable row level security;
 create policy "Profiles: user can manage their row" on profiles
   for all using ( auth.uid() = user_id )
   with check ( auth.uid() = user_id );
+create policy "Profiles: users can read all profiles" on profiles
+  for select using ( true );
 
 -- friend_requests
 create table if not exists friend_requests (
