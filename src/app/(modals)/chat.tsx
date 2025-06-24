@@ -29,6 +29,7 @@ export default function ChatScreen() {
   const [uploading, setUploading] = useState(false)
   const [chatTitle, setChatTitle] = useState('Chat')
   const flatListRef = useRef<FlatList>(null)
+  const [receipts, setReceipts] = useState<Record<number, string[]>>({})
   const [selectedMedia, setSelectedMedia] = useState<Array<{
     id: string
     uri: string
@@ -69,10 +70,25 @@ export default function ChatScreen() {
                 sender_id: newMessage.sender_id,
                 created_at: newMessage.created_at,
                 sender_name: profile?.username || 'Unknown',
-                is_own_message: newMessage.sender_id === user?.id,
+                is_own_message: newMessage.sender_id === (user?.id || ''),
                 media_url: newMessage.media_url,
               }
             ])
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'message_reads'
+          },
+          (payload) => {
+            const readData = payload.new as any
+            setReceipts(prev => ({
+              ...prev,
+              [readData.message_id]: [...(prev[readData.message_id] || []), readData.reader_id]
+            }))
           }
         )
         .subscribe()
@@ -128,6 +144,21 @@ export default function ChatScreen() {
       }
 
       setMessages(data || [])
+      
+      // Load read receipts for messages
+      if (data && data.length > 0) {
+        const messageIds = data.map((m: any) => m.id)
+        const { data: reads } = await supabase
+          .from('message_reads')
+          .select('message_id, reader_id')
+          .in('message_id', messageIds)
+        
+        const receiptsMap: Record<number, string[]> = {}
+        reads?.forEach((r: any) => {
+          receiptsMap[r.message_id] = [...(receiptsMap[r.message_id] || []), r.reader_id]
+        })
+        setReceipts(receiptsMap)
+      }
     } catch (error) {
       console.error('Error loading messages:', error)
       Alert.alert(
@@ -152,8 +183,8 @@ export default function ChatScreen() {
 
     try {
       setSending(true)
-      const { data: user } = await supabase.auth.getUser()
-      if (!user.user) return
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
       // Send text message if there's text
       if (newMessage.trim()) {
@@ -161,7 +192,7 @@ export default function ChatScreen() {
           .from('messages')
           .insert({
             channel_id: channelId,
-            sender_id: user.user.id,
+            sender_id: user.id,
             content: newMessage,
           })
         
@@ -184,7 +215,7 @@ export default function ChatScreen() {
 
       // Send media messages
       for (const media of selectedMedia) {
-        await uploadAndSendMedia(media, user.user.id)
+        await uploadAndSendMedia(media, user.id)
       }
 
       setNewMessage('')
@@ -311,11 +342,21 @@ export default function ChatScreen() {
             {item.content}
           </Text>
         )}
-        <Text className={`text-xs mt-1 ${
-          item.is_own_message ? 'text-blue-100' : 'text-gray-400'
-        }`}>
-          {formatTime(item.created_at)}
-        </Text>
+        <View className="flex-row items-center justify-between mt-1">
+          <Text className={`text-xs ${
+            item.is_own_message ? 'text-blue-100' : 'text-gray-400'
+          }`}>
+            {formatTime(item.created_at)}
+          </Text>
+          {item.is_own_message && (
+            <Feather
+              name={receipts[item.id]?.length ? 'check-circle' : 'check'}
+              size={14}
+              color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
+              style={{ marginLeft: 4 }}
+            />
+          )}
+        </View>
       </View>
     </View>
   )
@@ -365,6 +406,37 @@ export default function ChatScreen() {
       ]
     )
   }
+
+  // Mark messages as read when they become visible
+  const markMessagesAsRead = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const unreadMessages = messages.filter(m => 
+        !m.is_own_message && 
+        !(receipts[m.id]?.includes(user.id))
+      )
+
+      if (unreadMessages.length > 0) {
+        const reads = unreadMessages.map(m => ({
+          message_id: m.id,
+          reader_id: user.id
+        }))
+
+        await supabase.from('message_reads').insert(reads)
+      }
+    } catch (error) {
+      console.error('Error marking messages as read:', error)
+    }
+  }
+
+  // Mark as read when messages change or screen gains focus
+  useEffect(() => {
+    if (messages.length > 0) {
+      markMessagesAsRead()
+    }
+  }, [messages])
 
   if (loading) {
     return (
