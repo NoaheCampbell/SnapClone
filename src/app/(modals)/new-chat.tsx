@@ -71,6 +71,7 @@ export default function NewChatScreen() {
       const { data: user } = await supabase.auth.getUser()
       if (!user.user) return
 
+      console.log('Creating channel...')
       // Create channel
       const { data: channel, error: channelError } = await supabase
         .from('channels')
@@ -80,10 +81,18 @@ export default function NewChatScreen() {
         .select()
         .single()
 
-      if (channelError) throw channelError
+      if (channelError) {
+        console.error('Channel creation error:', channelError)
+        throw channelError
+      }
+
+      console.log('Channel created successfully:', channel.id)
+      console.log('Adding members...')
 
       // Add current user to channel
       const members = [user.user.id, ...selectedFriends]
+      console.log('Members to add:', members)
+      
       const { error: membersError } = await supabase
         .from('channel_members')
         .insert(
@@ -93,8 +102,12 @@ export default function NewChatScreen() {
           }))
         )
 
-      if (membersError) throw membersError
+      if (membersError) {
+        console.error('Members addition error:', membersError)
+        throw membersError
+      }
 
+      console.log('Members added successfully')
       // Navigate to the new chat
       router.replace(`/(modals)/chat?channelId=${channel.id}`)
     } catch (error) {

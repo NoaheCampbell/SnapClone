@@ -127,12 +127,16 @@ create table if not exists channel_members (
 alter table channel_members enable row level security;
 create policy "ChannelMembers: member can select" on channel_members
   for select using ( member_id = auth.uid() );
+create policy "ChannelMembers: users can join channels" on channel_members
+  for insert with check ( member_id = auth.uid() );
 
 -- channels policy (after channel_members exists)
 create policy "Channels: members can select" on channels
   for select using (
     id in (select channel_id from channel_members where member_id = auth.uid())
   );
+create policy "Channels: users can create channels" on channels
+  for insert with check ( true );
 
 -- messages
 create table if not exists messages (
@@ -147,6 +151,11 @@ create table if not exists messages (
 alter table messages enable row level security;
 create policy "Messages: channel members" on messages
   for select using (
+    channel_id in (select channel_id from channel_members where member_id = auth.uid())
+  );
+create policy "Messages: members can send messages" on messages
+  for insert with check (
+    auth.uid() = sender_id and
     channel_id in (select channel_id from channel_members where member_id = auth.uid())
   );
 
