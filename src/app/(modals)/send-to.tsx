@@ -273,10 +273,18 @@ export default function SendToModal() {
                   onPress={() => toggleFriend(item.user_id)}
                   className="flex-row items-center p-2"
                 >
-                  <Image
-                    source={{ uri: item.avatar_url || 'https://i.pravatar.cc/150?u=' + item.username }}
-                    className="w-12 h-12 rounded-full mr-4"
-                  />
+                  {item.avatar_url ? (
+                    <Image
+                      source={{ uri: item.avatar_url }}
+                      className="w-12 h-12 rounded-full mr-4"
+                    />
+                  ) : (
+                    <Image
+                      source={require('../../../assets/images/avatar-placeholder.png')}
+                      className="w-12 h-12 rounded-full mr-4"
+                      resizeMode="cover"
+                    />
+                  )}
                   <Text className="text-white text-lg flex-1">
                     {item.display_name || item.username}
                   </Text>
