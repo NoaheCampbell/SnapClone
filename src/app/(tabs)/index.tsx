@@ -1,5 +1,5 @@
 import { View, Text, TouchableOpacity, Alert, TextInput } from 'react-native'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -108,11 +108,13 @@ export default function CameraScreen() {
   };
 
   const finishEditingText = (id: string) => {
+    console.log('Finishing edit for id:', id, 'with text:', editingText);
     updateTextOverlay(id, { 
       text: editingText.trim() || 'Text', 
       isEditing: false 
     });
     setEditingText('');
+    setSelectedTextId(null);
   };
 
   const deleteTextOverlay = (id: string) => {
@@ -196,9 +198,15 @@ export default function CameraScreen() {
     }
   };
 
-    const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
+  const DraggableText = ({ textOverlay }: { textOverlay: TextOverlay }) => {
     const translateX = useSharedValue(0);
     const translateY = useSharedValue(0);
+
+     const tapGesture = Gesture.Tap()
+      .onEnd(() => {
+        console.log('Tap gesture detected on text:', textOverlay.id);
+        runOnJS(startEditingText)(textOverlay.id);
+      });
 
     const panGesture = Gesture.Pan()
       .onBegin((event) => {
@@ -218,16 +226,11 @@ export default function CameraScreen() {
           y: textOverlay.y + translationY,
         });
 
-        const isTap = Math.abs(translationX) < 5 && Math.abs(translationY) < 5;
-        console.log('Is tap detected:', isTap);
-        if (isTap) {
-          console.log('Starting edit for text overlay:', textOverlay.id);
-          runOnJS(startEditingText)(textOverlay.id);
-        }
-
         translateX.value = 0;
         translateY.value = 0;
       });
+
+    const composedGesture = Gesture.Race(tapGesture, panGesture);
 
     const animatedStyle = useAnimatedStyle(() => {
       return {
@@ -263,7 +266,10 @@ export default function CameraScreen() {
             <TextInput
               value={editingText}
               onChangeText={setEditingText}
-              onBlur={() => finishEditingText(textOverlay.id)}
+              onBlur={() => {
+                console.log('TextInput onBlur triggered');
+                finishEditingText(textOverlay.id);
+              }}
               onSubmitEditing={() => finishEditingText(textOverlay.id)}
               style={{
                 fontSize: textOverlay.fontSize,
@@ -276,6 +282,7 @@ export default function CameraScreen() {
               selectTextOnFocus={true}
               multiline={false}
               maxLength={100}
+              blurOnSubmit={true}
             />
           </View>
         </Animated.View>
@@ -283,7 +290,7 @@ export default function CameraScreen() {
     }
 
           return (
-        <GestureDetector gesture={panGesture}>
+        <GestureDetector gesture={composedGesture}>
           <Animated.View
             style={[
               animatedStyle,
@@ -342,7 +349,7 @@ export default function CameraScreen() {
         {/* Text Overlays */}
         {textOverlays.map((textOverlay) => {
           console.log('Rendering text overlay:', textOverlay.text, 'at position:', textOverlay.x, textOverlay.y);
-          return <DraggableText key={textOverlay.id} textOverlay={textOverlay} />;
+          return <DraggableText key={`${textOverlay.id}-${textOverlay.isEditing}`} textOverlay={textOverlay} />;
         })}
 
         <View style={{ flex: 1, justifyContent: 'space-between' }}>
