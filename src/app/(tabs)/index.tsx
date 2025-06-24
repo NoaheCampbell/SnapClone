@@ -1,14 +1,16 @@
 import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image, ScrollView } from 'react-native'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Feather, Ionicons } from '@expo/vector-icons';
+import { Camera, CameraView, CameraType, FlashMode } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
 import { captureRef } from 'react-native-view-shot';
 import { mergePhotoWithText, applyImageFilter } from '../../lib/mergeWithSkia';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { photoFilters, FilterConfig } from '../../lib/photoFilters';
 
 interface TextOverlay {
   id: string;
@@ -21,101 +23,7 @@ interface TextOverlay {
   isEditing: boolean;
 }
 
-interface ColorFilter {
-  id: string;
-  name: string;
-  style: any;
-  icon: string;
-}
 
-const colorFilters: ColorFilter[] = [
-  {
-    id: 'none',
-    name: 'None',
-    style: {},
-    icon: 'circle'
-  },
-  {
-    id: 'bw',
-    name: 'B&W',
-    style: {
-      // Will be handled specially in getFilterOverlay
-    },
-    icon: 'square'
-  },
-  {
-    id: 'sepia',
-    name: 'Sepia',
-    style: {
-      tintColor: '#8B4513',
-      opacity: 0.6,
-    },
-    icon: 'sun'
-  },
-  {
-    id: 'cool',
-    name: 'Cool',
-    style: {
-      tintColor: '#4A90E2',
-      opacity: 0.3,
-    },
-    icon: 'droplet'
-  },
-  {
-    id: 'warm',
-    name: 'Warm',
-    style: {
-      tintColor: '#FF6B35',
-      opacity: 0.3,
-    },
-    icon: 'thermometer'
-  },
-  {
-    id: 'vintage',
-    name: 'Vintage',
-    style: {
-      tintColor: '#D4A574',
-      opacity: 0.4,
-    },
-    icon: 'camera'
-  },
-  {
-    id: 'dramatic',
-    name: 'Drama',
-    style: {
-      tintColor: '#8B0000',
-      opacity: 0.4,
-    },
-    icon: 'zap'
-  },
-  {
-    id: 'neon',
-    name: 'Neon',
-    style: {
-      tintColor: '#00FFFF',
-      opacity: 0.3,
-    },
-    icon: 'star'
-  },
-  {
-    id: 'sunset',
-    name: 'Sunset',
-    style: {
-      tintColor: '#FF4500',
-      opacity: 0.35,
-    },
-    icon: 'sunset'
-  },
-  {
-    id: 'noir',
-    name: 'Noir',
-    style: {
-      tintColor: '#000000',
-      opacity: 0.5,
-    },
-    icon: 'moon'
-  }
-];
 
 export default function CameraScreen() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
@@ -126,27 +34,26 @@ export default function CameraScreen() {
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [photoLoaded, setPhotoLoaded] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<string>('none');
+  const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(photoFilters[0]);
   const [showFilters, setShowFilters] = useState(false);
+  const [cameraType, setCameraType] = useState<CameraType>('back');
+  const [flashMode, setFlashMode] = useState<FlashMode>('off');
 
-  const [permission, requestPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
   const cameraRef = useRef<CameraView>(null);
   const containerRef = useRef<View>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const insets = useSafeAreaInsets();
 
   // Text colors
   const textColors = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'];
 
   useEffect(() => {
-    if (permission?.granted) {
-      setHasPermission(true);
-    } else if (permission?.status === 'undetermined') {
-      setHasPermission(null);
-    } else {
-      setHasPermission(false);
-    }
-  }, [permission]);
+    (async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === 'granted');
+    })();
+  }, []);
 
   useEffect(() => {
     if (mediaLibraryPermission?.granted) {
@@ -159,13 +66,10 @@ export default function CameraScreen() {
   }, [mediaLibraryPermission]);
 
   useEffect(() => {
-    if (permission?.status === 'undetermined') {
-      requestPermission();
-    }
     if (mediaLibraryPermission?.status === 'undetermined') {
       requestMediaLibraryPermission();
     }
-  }, [permission?.status, mediaLibraryPermission?.status, requestPermission, requestMediaLibraryPermission]);
+  }, [mediaLibraryPermission?.status, requestMediaLibraryPermission]);
 
   const addTextOverlay = () => {
     const newText: TextOverlay = {
@@ -222,231 +126,156 @@ export default function CameraScreen() {
     setSelectedTextId(null);
   };
 
-  const getFilterOverlay = () => {
-    const filter = colorFilters.find(f => f.id === selectedFilter);
-    if (!filter || filter.id === 'none') return null;
 
-    if (filter.id === 'bw') {
-      // Better B&W effect using multiple layers
-      return (
-        <>
-          {/* Base desaturation */}
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: '#808080',
-              opacity: 0.7,
-            }}
-            pointerEvents="none"
-          />
-          {/* Contrast enhancement */}
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: '#FFFFFF',
-              opacity: 0.2,
-            }}
-            pointerEvents="none"
-          />
-        </>
-      );
-    }
 
+  const renderFilterPreview = (filter: FilterConfig) => {
+    const isSelected = filter.id === selectedFilter.id;
+    
     return (
-      <View
-        style={[
-          {
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: filter.style.tintColor || 'transparent',
-            opacity: filter.style.opacity || 0.3,
-          }
-        ]}
-        pointerEvents="none"
-      />
+      <TouchableOpacity
+        key={filter.id}
+        style={{
+          alignItems: 'center',
+          marginHorizontal: 8,
+          opacity: isSelected ? 1 : 0.7,
+        }}
+        onPress={() => setSelectedFilter(filter)}
+      >
+        <View
+          style={{
+            width: 50,
+            height: 50,
+            borderRadius: 25,
+            backgroundColor: isSelected ? '#007AFF' : '#333',
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: 4,
+            borderWidth: isSelected ? 2 : 0,
+            borderColor: '#007AFF',
+          }}
+        >
+          <Ionicons 
+            name={filter.icon as any} 
+            size={24} 
+            color={isSelected ? 'white' : '#999'} 
+          />
+        </View>
+        <Text
+          style={{
+            color: isSelected ? '#007AFF' : '#999',
+            fontSize: 12,
+            fontWeight: isSelected ? '600' : '400',
+          }}
+        >
+          {filter.name}
+        </Text>
+      </TouchableOpacity>
     );
   };
 
-  const renderFilterButton = (filter: ColorFilter) => (
-    <TouchableOpacity
-      key={filter.id}
-      onPress={() => {
-        setSelectedFilter(filter.id);
-        setShowFilters(false);
-      }}
-      style={{
-        alignItems: 'center',
-        marginHorizontal: 8,
-        paddingVertical: 8,
-      }}
-    >
-      <View
-        style={{
-          width: 50,
-          height: 50,
-          borderRadius: 25,
-          backgroundColor: selectedFilter === filter.id ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: selectedFilter === filter.id ? 2 : 1,
-          borderColor: selectedFilter === filter.id ? '#FFD700' : 'rgba(255,255,255,0.3)',
-        }}
-      >
-        <Feather name={filter.icon as any} size={20} color="white" />
-        {filter.id !== 'none' && filter.id !== 'invert' && (
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              borderRadius: 25,
-              backgroundColor: filter.style.tintColor,
-              opacity: filter.style.opacity * 0.7,
-            }}
-          />
-        )}
-      </View>
-      <Text style={{ color: 'white', fontSize: 10, marginTop: 4, textAlign: 'center' }}>
-        {filter.name}
-      </Text>
-    </TouchableOpacity>
-  );
+  const toggleCameraType = useCallback(() => {
+    setCameraType(current => (current === 'back' ? 'front' : 'back'));
+  }, []);
 
-  if (hasPermission === null) {
-    return <View style={{ flex: 1, backgroundColor: 'black' }} />;
-  }
-  
-  if (hasPermission === false) {
-    return (
-      <View style={{ flex: 1, backgroundColor: 'black', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-        <Feather name="camera-off" size={60} color="white" style={{ marginBottom: 20 }} />
-        <Text style={{ color: 'white', fontSize: 18, textAlign: 'center', marginBottom: 20 }}>
-          Camera permission required
-        </Text>
-        <TouchableOpacity 
-          onPress={requestPermission}
-          style={{
-            backgroundColor: 'white',
-            paddingHorizontal: 20,
-            paddingVertical: 12,
-            borderRadius: 25,
-          }}
-        >
-          <Text style={{ color: 'black', fontSize: 16, fontWeight: 'bold' }}>
-            Grant Camera Permission
-          </Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const toggleFlash = useCallback(() => {
+    setFlashMode(current => {
+      switch (current) {
+        case 'off': return 'on';
+        case 'on': return 'auto';
+        case 'auto': return 'off';
+        default: return 'off';
+      }
+    });
+  }, []);
 
-  const handleTakePhoto = async () => {
-    if (!cameraRef.current) return;
+  const getFlashIcon = () => {
+    switch (flashMode) {
+      case 'on': return 'flash';
+      case 'auto': return 'flash-outline';
+      case 'off': return 'flash-off';
+      default: return 'flash-off';
+    }
+  };
+
+  const capturePhoto = useCallback(async () => {
+    if (!cameraRef.current || isCapturing) return;
     
     if (!hasMediaLibraryPermission) {
-      Alert.alert(
-        'Permission Required',
-        'Camera roll access is required to save photos. Please grant permission in Settings.',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Permission needed', 'Please grant media library access to save photos.');
       return;
     }
 
     try {
       setIsCapturing(true);
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+      });
 
       if (!photo?.uri) {
         throw new Error('Failed to capture photo');
       }
 
-      let processedUri = photo.uri;
+      let finalUri = photo.uri;
 
-      // Temporarily disable Skia processing until we can debug it properly
-      if (false && selectedFilter === 'bw') {
-        try {
-          console.log(`Applying ${selectedFilter} filter using Skia...`);
-          processedUri = await applyImageFilter(
-            photo.uri, 
-            selectedFilter, 
-            photo.width || 1920, 
-            photo.height || 1080
-          );
-          console.log(`Filter applied successfully. Original: ${photo.uri}, Filtered: ${processedUri}`);
-        } catch (filterError) {
-          console.warn('Skia filter failed, falling back to overlay method:', filterError);
-          // Fall back to overlay method if Skia fails
-        }
-      } else {
-        console.log(`Using overlay method for filter: ${selectedFilter}`);
-      }
+      // Apply real filter if one is selected and has a component
+      if (selectedFilter.component) {
+        console.log(`Applying real ${selectedFilter.name} filter to captured photo...`);
+        
+        // Create a temporary image element to apply the filter
+        setCapturedPhoto(photo.uri);
+        setPhotoLoaded(false);
+        
+        // Wait for the image to load so we can capture it with the filter applied
+        await Promise.race([
+          new Promise(resolve => {
+            const checkLoaded = () => {
+              if (photoLoaded) {
+                resolve(true);
+              } else {
+                setTimeout(checkLoaded, 50);
+              }
+            };
+            checkLoaded();
+          }),
+          new Promise(res => setTimeout(res, 2000)) // 2 second timeout
+        ]);
 
-      // Hide UI controls so they don't appear in the snapshot
-      setControlsVisible(false);
-
-      // Render the processed photo inside the view hierarchy so view-shot can grab it
-      setCapturedPhoto(processedUri);
-      setPhotoLoaded(false);
-      // Wait until Image onLoadEnd fires (max 500ms fallback)
-      await Promise.race([
-        new Promise<void>((res) => {
-          const check = () => {
-            if (photoLoaded) return res();
-            requestAnimationFrame(check);
-          };
-          check();
-        }),
-        new Promise(res => setTimeout(res, 500))
-      ]);
-
-      let finalUri = processedUri;
-
-      if (textOverlays.length > 0 && containerRef.current) {
-        try {
-          finalUri = await captureRef(containerRef.current, {
-            format: 'png',
-            quality: 1,
-          });
-        } catch (e) {
-          console.warn('view-shot merge failed', e);
+        // Capture the filtered image using view-shot
+        if (containerRef.current) {
+          try {
+            const filteredUri = await captureRef(containerRef.current, {
+              format: 'jpg',
+              quality: 0.9,
+            });
+            finalUri = filteredUri;
+            console.log(`Filter applied successfully. Filtered: ${filteredUri}`);
+          } catch (error) {
+            console.warn('Failed to capture filtered image, using original:', error);
+          }
         }
       }
 
-      await MediaLibrary.saveToLibraryAsync(finalUri);
+      // Save to media library
+      const asset = await MediaLibrary.createAssetAsync(finalUri);
+      console.log('Photo saved:', asset.uri);
       
       Alert.alert(
-        'Photo Saved! 📸',
-        textOverlays.length > 0 ? 'Photo with text saved!' : 'Your snap is in your camera roll.',
-        [{ text: 'OK' }]
+        'Photo Saved!', 
+        `Photo saved with ${selectedFilter.name} filter`,
+        [{ 
+          text: 'OK', 
+          onPress: () => setCapturedPhoto(null) // Clear the captured photo
+        }]
       );
-
-      // Reset
-      setCapturedPhoto(null);
-      setControlsVisible(true);
+      
     } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert(
-        'Error',
-        'Failed to take photo. Please try again.',
-        [{ text: 'OK' }]
-      );
+      console.error('Error capturing photo:', error);
+      Alert.alert('Error', 'Failed to capture photo. Please try again.');
     } finally {
       setIsCapturing(false);
     }
-  };
+  }, [selectedFilter, isCapturing, hasMediaLibraryPermission, photoLoaded, containerRef]);
 
   // Editable text component
   const EditableTextInput = ({ textOverlay }: { textOverlay: TextOverlay }) => {
@@ -583,6 +412,72 @@ export default function CameraScreen() {
     );
   };
 
+  const renderFilteredCamera = () => {
+    // For live camera preview, we'll use overlays since color matrix filters don't work with CameraView
+    // The real filters will be applied to captured photos
+    const cameraView = (
+      <CameraView
+        ref={cameraRef}
+        style={{ flex: 1 }}
+        facing={cameraType}
+        flash={flashMode}
+      />
+    );
+
+    // Always return camera with potential overlay - real filters applied on capture
+    if (selectedFilter.overlayStyle) {
+      return (
+        <View style={{ flex: 1 }}>
+          {cameraView}
+          <View
+            style={{
+              ...selectedFilter.overlayStyle,
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              pointerEvents: 'none',
+            }}
+          />
+        </View>
+      );
+    }
+
+    return cameraView;
+  };
+
+  if (hasPermission === null) {
+    return <View style={{ flex: 1, backgroundColor: 'black' }} />;
+  }
+  
+  if (hasPermission === false) {
+    return (
+      <View style={{ flex: 1, backgroundColor: 'black', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <Feather name="camera-off" size={60} color="white" style={{ marginBottom: 20 }} />
+        <Text style={{ color: 'white', fontSize: 18, textAlign: 'center', marginBottom: 20 }}>
+          Camera permission required
+        </Text>
+        <TouchableOpacity 
+          onPress={async () => {
+            const { status } = await Camera.requestCameraPermissionsAsync();
+            setHasPermission(status === 'granted');
+          }}
+          style={{
+            backgroundColor: 'white',
+            paddingHorizontal: 20,
+            paddingVertical: 12,
+            borderRadius: 25,
+          }}
+        >
+          <Text style={{ color: 'black', fontSize: 16, fontWeight: 'bold' }}>
+            Grant Camera Permission
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
@@ -592,23 +487,28 @@ export default function CameraScreen() {
           onPress={dismissAllEditing}
         >
           {capturedPhoto ? (
-            <Image 
-              source={{ uri: capturedPhoto }} 
-              style={{ flex: 1 }} 
-              resizeMode="cover" 
-              onLoadEnd={() => setPhotoLoaded(true)}
-            />
+            selectedFilter.component ? (
+              <selectedFilter.component style={{ flex: 1 }}>
+                <Image 
+                  source={{ uri: capturedPhoto }} 
+                  style={{ flex: 1 }} 
+                  resizeMode="cover" 
+                  onLoadEnd={() => setPhotoLoaded(true)}
+                />
+              </selectedFilter.component>
+            ) : (
+              <Image 
+                source={{ uri: capturedPhoto }} 
+                style={{ flex: 1 }} 
+                resizeMode="cover" 
+                onLoadEnd={() => setPhotoLoaded(true)}
+              />
+            )
           ) : (
-            <CameraView 
-              ref={cameraRef}
-              style={{ flex: 1 }} 
-              facing={'back'}
-              enableTorch={torchOn}
-            />
+            renderFilteredCamera()
           )}
           
-          {/* Filter Overlay */}
-          {getFilterOverlay()}
+          {/* No additional overlay needed - filters handled in renderFilteredCamera */}
         </TouchableOpacity>
         
         <SafeAreaView style={{ 
@@ -634,7 +534,7 @@ export default function CameraScreen() {
               </TouchableOpacity>
               
               {/* Filter Indicator */}
-              {selectedFilter !== 'none' && (
+              {selectedFilter.id !== 'none' && (
                 <View style={{ 
                   backgroundColor: 'rgba(0,0,0,0.6)', 
                   borderRadius: 15, 
@@ -644,16 +544,16 @@ export default function CameraScreen() {
                   justifyContent: 'center'
                 }}>
                   <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
-                    {colorFilters.find(f => f.id === selectedFilter)?.name}
+                    {selectedFilter.name}
                   </Text>
                 </View>
               )}
               
               <TouchableOpacity 
-                onPress={() => setTorchOn(!torchOn)} 
+                onPress={toggleFlash} 
                 style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
               >
-                <Feather name={torchOn ? 'zap' : 'zap-off'} size={24} color="white" />
+                <Ionicons name={getFlashIcon()} size={24} color="white" />
               </TouchableOpacity>
             </View>
 
@@ -759,7 +659,7 @@ export default function CameraScreen() {
 
               {/* Shutter Button */}
               <TouchableOpacity 
-                onPress={handleTakePhoto}
+                onPress={capturePhoto}
                 disabled={isCapturing}
                 style={{
                   width: 70,
@@ -815,7 +715,7 @@ export default function CameraScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={{ paddingHorizontal: 16 }}
                 >
-                  {colorFilters.map(renderFilterButton)}
+                  {photoFilters.map(renderFilterPreview)}
                 </ScrollView>
               </View>
             )}
