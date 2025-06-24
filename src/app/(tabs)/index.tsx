@@ -523,23 +523,50 @@ export default function CameraScreen() {
           onPress={dismissAllEditing}
         >
           {capturedPhoto ? (
-            selectedFilter.component ? (
-              <selectedFilter.component style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>
+              {selectedFilter.component ? (
+                <selectedFilter.component style={{ flex: 1 }}>
+                  <Image 
+                    source={{ uri: capturedPhoto }} 
+                    style={{ flex: 1 }} 
+                    resizeMode="cover" 
+                    onLoadEnd={() => setPhotoLoaded(true)}
+                  />
+                </selectedFilter.component>
+              ) : (
                 <Image 
                   source={{ uri: capturedPhoto }} 
                   style={{ flex: 1 }} 
                   resizeMode="cover" 
                   onLoadEnd={() => setPhotoLoaded(true)}
                 />
-              </selectedFilter.component>
-            ) : (
-              <Image 
-                source={{ uri: capturedPhoto }} 
-                style={{ flex: 1 }} 
-                resizeMode="cover" 
-                onLoadEnd={() => setPhotoLoaded(true)}
-              />
-            )
+              )}
+              {/* Apply overlay for filters that use overlayStyle or B&W */}
+              {selectedFilter.id === 'bw' ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: '#666666',
+                    opacity: 0.3,
+                  }}
+                />
+              ) : selectedFilter.overlayStyle ? (
+                <View
+                  style={{
+                    ...selectedFilter.overlayStyle,
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                  }}
+                />
+              ) : null}
+            </View>
           ) : (
             renderFilteredCamera()
           )}
