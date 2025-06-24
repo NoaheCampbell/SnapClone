@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image } from 'react-native'
+import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image, ScrollView } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -8,7 +8,7 @@ import { router } from 'expo-router';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, runOnJS } from 'react-native-reanimated';
 import { captureRef } from 'react-native-view-shot';
-import { mergePhotoWithText } from '../../lib/mergeWithSkia';
+import { mergePhotoWithText, applyImageFilter } from '../../lib/mergeWithSkia';
 
 interface TextOverlay {
   id: string;
@@ -21,6 +21,102 @@ interface TextOverlay {
   isEditing: boolean;
 }
 
+interface ColorFilter {
+  id: string;
+  name: string;
+  style: any;
+  icon: string;
+}
+
+const colorFilters: ColorFilter[] = [
+  {
+    id: 'none',
+    name: 'None',
+    style: {},
+    icon: 'circle'
+  },
+  {
+    id: 'bw',
+    name: 'B&W',
+    style: {
+      // Will be handled specially in getFilterOverlay
+    },
+    icon: 'square'
+  },
+  {
+    id: 'sepia',
+    name: 'Sepia',
+    style: {
+      tintColor: '#8B4513',
+      opacity: 0.6,
+    },
+    icon: 'sun'
+  },
+  {
+    id: 'cool',
+    name: 'Cool',
+    style: {
+      tintColor: '#4A90E2',
+      opacity: 0.3,
+    },
+    icon: 'droplet'
+  },
+  {
+    id: 'warm',
+    name: 'Warm',
+    style: {
+      tintColor: '#FF6B35',
+      opacity: 0.3,
+    },
+    icon: 'thermometer'
+  },
+  {
+    id: 'vintage',
+    name: 'Vintage',
+    style: {
+      tintColor: '#D4A574',
+      opacity: 0.4,
+    },
+    icon: 'camera'
+  },
+  {
+    id: 'dramatic',
+    name: 'Drama',
+    style: {
+      tintColor: '#8B0000',
+      opacity: 0.4,
+    },
+    icon: 'zap'
+  },
+  {
+    id: 'neon',
+    name: 'Neon',
+    style: {
+      tintColor: '#00FFFF',
+      opacity: 0.3,
+    },
+    icon: 'star'
+  },
+  {
+    id: 'sunset',
+    name: 'Sunset',
+    style: {
+      tintColor: '#FF4500',
+      opacity: 0.35,
+    },
+    icon: 'sunset'
+  },
+  {
+    id: 'noir',
+    name: 'Noir',
+    style: {
+      tintColor: '#000000',
+      opacity: 0.5,
+    },
+    icon: 'moon'
+  }
+];
+
 export default function CameraScreen() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [hasMediaLibraryPermission, setHasMediaLibraryPermission] = useState<boolean | null>(null);
@@ -30,6 +126,8 @@ export default function CameraScreen() {
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [photoLoaded, setPhotoLoaded] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<string>('none');
+  const [showFilters, setShowFilters] = useState(false);
 
   const [permission, requestPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
@@ -124,6 +222,109 @@ export default function CameraScreen() {
     setSelectedTextId(null);
   };
 
+  const getFilterOverlay = () => {
+    const filter = colorFilters.find(f => f.id === selectedFilter);
+    if (!filter || filter.id === 'none') return null;
+
+    if (filter.id === 'bw') {
+      // Better B&W effect using multiple layers
+      return (
+        <>
+          {/* Base desaturation */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#808080',
+              opacity: 0.7,
+            }}
+            pointerEvents="none"
+          />
+          {/* Contrast enhancement */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#FFFFFF',
+              opacity: 0.2,
+            }}
+            pointerEvents="none"
+          />
+        </>
+      );
+    }
+
+    return (
+      <View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: filter.style.tintColor || 'transparent',
+            opacity: filter.style.opacity || 0.3,
+          }
+        ]}
+        pointerEvents="none"
+      />
+    );
+  };
+
+  const renderFilterButton = (filter: ColorFilter) => (
+    <TouchableOpacity
+      key={filter.id}
+      onPress={() => {
+        setSelectedFilter(filter.id);
+        setShowFilters(false);
+      }}
+      style={{
+        alignItems: 'center',
+        marginHorizontal: 8,
+        paddingVertical: 8,
+      }}
+    >
+      <View
+        style={{
+          width: 50,
+          height: 50,
+          borderRadius: 25,
+          backgroundColor: selectedFilter === filter.id ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: selectedFilter === filter.id ? 2 : 1,
+          borderColor: selectedFilter === filter.id ? '#FFD700' : 'rgba(255,255,255,0.3)',
+        }}
+      >
+        <Feather name={filter.icon as any} size={20} color="white" />
+        {filter.id !== 'none' && filter.id !== 'invert' && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              borderRadius: 25,
+              backgroundColor: filter.style.tintColor,
+              opacity: filter.style.opacity * 0.7,
+            }}
+          />
+        )}
+      </View>
+      <Text style={{ color: 'white', fontSize: 10, marginTop: 4, textAlign: 'center' }}>
+        {filter.name}
+      </Text>
+    </TouchableOpacity>
+  );
+
   if (hasPermission === null) {
     return <View style={{ flex: 1, backgroundColor: 'black' }} />;
   }
@@ -172,11 +373,32 @@ export default function CameraScreen() {
         throw new Error('Failed to capture photo');
       }
 
+      let processedUri = photo.uri;
+
+      // Temporarily disable Skia processing until we can debug it properly
+      if (false && selectedFilter === 'bw') {
+        try {
+          console.log(`Applying ${selectedFilter} filter using Skia...`);
+          processedUri = await applyImageFilter(
+            photo.uri, 
+            selectedFilter, 
+            photo.width || 1920, 
+            photo.height || 1080
+          );
+          console.log(`Filter applied successfully. Original: ${photo.uri}, Filtered: ${processedUri}`);
+        } catch (filterError) {
+          console.warn('Skia filter failed, falling back to overlay method:', filterError);
+          // Fall back to overlay method if Skia fails
+        }
+      } else {
+        console.log(`Using overlay method for filter: ${selectedFilter}`);
+      }
+
       // Hide UI controls so they don't appear in the snapshot
       setControlsVisible(false);
 
-      // Render the captured photo inside the view hierarchy so view-shot can grab it
-      setCapturedPhoto(photo.uri);
+      // Render the processed photo inside the view hierarchy so view-shot can grab it
+      setCapturedPhoto(processedUri);
       setPhotoLoaded(false);
       // Wait until Image onLoadEnd fires (max 500ms fallback)
       await Promise.race([
@@ -190,11 +412,11 @@ export default function CameraScreen() {
         new Promise(res => setTimeout(res, 500))
       ]);
 
-      let mergedUri = photo.uri;
+      let finalUri = processedUri;
 
       if (textOverlays.length > 0 && containerRef.current) {
         try {
-          mergedUri = await captureRef(containerRef.current, {
+          finalUri = await captureRef(containerRef.current, {
             format: 'png',
             quality: 1,
           });
@@ -203,7 +425,7 @@ export default function CameraScreen() {
         }
       }
 
-      await MediaLibrary.saveToLibraryAsync(mergedUri);
+      await MediaLibrary.saveToLibraryAsync(finalUri);
       
       Alert.alert(
         'Photo Saved! 📸',
@@ -384,6 +606,9 @@ export default function CameraScreen() {
               enableTorch={torchOn}
             />
           )}
+          
+          {/* Filter Overlay */}
+          {getFilterOverlay()}
         </TouchableOpacity>
         
         <SafeAreaView style={{ 
@@ -407,6 +632,22 @@ export default function CameraScreen() {
               >
                 <Feather name="settings" size={24} color="white" />
               </TouchableOpacity>
+              
+              {/* Filter Indicator */}
+              {selectedFilter !== 'none' && (
+                <View style={{ 
+                  backgroundColor: 'rgba(0,0,0,0.6)', 
+                  borderRadius: 15, 
+                  paddingHorizontal: 12, 
+                  paddingVertical: 6,
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                    {colorFilters.find(f => f.id === selectedFilter)?.name}
+                  </Text>
+                </View>
+              )}
               
               <TouchableOpacity 
                 onPress={() => setTorchOn(!torchOn)} 
@@ -544,9 +785,40 @@ export default function CameraScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Placeholder for symmetry */}
-              <View style={{ width: 48 }} />
+              {/* Filter Button */}
+              <TouchableOpacity
+                onPress={() => setShowFilters(!showFilters)}
+                style={{
+                  backgroundColor: showFilters ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.2)',
+                  borderRadius: 25,
+                  padding: 12,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Feather name="filter" size={24} color="white" />
+              </TouchableOpacity>
             </View>
+
+            {/* Filter Selection */}
+            {showFilters && (
+              <View style={{ 
+                position: 'absolute', 
+                bottom: 120, 
+                left: 0, 
+                right: 0, 
+                backgroundColor: 'rgba(0,0,0,0.7)', 
+                paddingVertical: 10 
+              }}>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 16 }}
+                >
+                  {colorFilters.map(renderFilterButton)}
+                </ScrollView>
+              </View>
+            )}
           </View>
         </SafeAreaView>
       </View>
