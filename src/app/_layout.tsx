@@ -14,7 +14,16 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="(modals)/send-to" options={{ presentation: 'modal' }} />
+              <Stack.Screen 
+                name="(modals)/send-to" 
+                options={{ 
+                  presentation: 'modal', 
+                  animation: 'fade', 
+                  headerShown: false, 
+                  contentStyle: { backgroundColor: 'transparent' }, 
+                  gestureEnabled: false,
+                }} 
+              />
               <Stack.Screen name="(modals)/settings" options={{ presentation: 'modal' }} />
               <Stack.Screen name="(modals)/chat" options={{ presentation: 'modal' }} />
               <Stack.Screen name="(modals)/new-chat" options={{ presentation: 'modal' }} />

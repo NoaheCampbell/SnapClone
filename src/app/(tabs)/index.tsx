@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image, ScrollView } from 'react-native'
+import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image, ScrollView, Modal } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,8 @@ import { captureRef } from 'react-native-view-shot';
 import { mergePhotoWithText, applyImageFilter } from '../../lib/mergeWithSkia';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { photoFilters, FilterConfig } from '../../lib/photoFilters';
+import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface TextOverlay {
   id: string;
@@ -38,6 +40,8 @@ export default function CameraScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [flashMode, setFlashMode] = useState<FlashMode>('off');
+  const { user } = useAuth();
+  const [postOptionsVisible, setPostOptionsVisible] = useState(false);
 
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
   const cameraRef = useRef<CameraView>(null);
@@ -242,23 +246,13 @@ export default function CameraScreen() {
           }
         }
 
-        // Restore UI
-        setControlsVisible(true);
-        setCapturedPhoto(null);
+        // keep controls hidden; capturedPhoto kept for preview
       }
 
-      // Save to media library
-      await MediaLibrary.saveToLibraryAsync(finalUri);
-      console.log('Photo saved to library:', finalUri);
-      
-      Alert.alert(
-        'Photo Saved!', 
-        `Photo saved with ${selectedFilter.name} filter`,
-        [{ 
-          text: 'OK', 
-          onPress: () => setCapturedPhoto(null) // Clear the captured photo
-        }]
-      );
+      // Store finalUri and show post options modal
+      setCapturedPhoto(finalUri);
+      setPhotoLoaded(true);
+      setPostOptionsVisible(true);
       
     } catch (error) {
       console.error('Error capturing photo:', error);
@@ -473,6 +467,42 @@ export default function CameraScreen() {
     return cameraView;
   };
 
+  const resetCamera = () => {
+    setCapturedPhoto(null);
+    setPostOptionsVisible(false);
+    setControlsVisible(true);
+  };
+
+  const addStory = useCallback(async () => {
+    if (!user || !capturedPhoto) { resetCamera(); return; }
+    try {
+      const fileUri = capturedPhoto;
+      const fileExt = fileUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const arrayBuf = await fetch(fileUri).then(r => r.arrayBuffer());
+      const path = `${user.id}/${Date.now()}.${fileExt}`;
+      const { error: upErr } = await supabase.storage.from('stories').upload(path, arrayBuf as any, {
+        cacheControl: '3600',
+        contentType: `image/${fileExt}`,
+      });
+      if (upErr && upErr.message !== 'The resource already exists') {
+        console.warn('upload error', upErr);
+        resetCamera();
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from('stories').getPublicUrl(path);
+      const { error: insErr } = await supabase.from('stories').insert({ user_id: user.id, media_url: publicUrl, media_type: 'image' });
+      if (insErr) console.warn('insert story error', insErr);
+    } catch (e) { console.warn('add story error', e); }
+    resetCamera();
+  }, [capturedPhoto, user]);
+
+  const sendPhoto = () => {
+    if (capturedPhoto) {
+      router.push({ pathname: '/(modals)/send-to', params: { uri: capturedPhoto } } as any);
+    }
+    resetCamera();
+  };
+
   if (hasPermission === null) {
     return <View style={{ flex: 1, backgroundColor: 'black' }} />;
   }
@@ -505,289 +535,350 @@ export default function CameraScreen() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
-        <TouchableOpacity 
-          style={{ flex: 1 }} 
-          activeOpacity={1}
-          onPress={dismissAllEditing}
-        >
-          {capturedPhoto ? (
-            <View style={{ flex: 1 }}>
-              {selectedFilter.component ? (
-                <selectedFilter.component style={{ flex: 1 }}>
+    <>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
+          <TouchableOpacity 
+            style={{ flex: 1 }} 
+            activeOpacity={1}
+            onPress={dismissAllEditing}
+          >
+            {capturedPhoto ? (
+              <View style={{ flex: 1 }}>
+                {selectedFilter.component ? (
+                  <selectedFilter.component style={{ flex: 1 }}>
+                    <Image 
+                      source={{ uri: capturedPhoto }} 
+                      style={{ flex: 1 }} 
+                      resizeMode="cover" 
+                      onLoadEnd={() => setPhotoLoaded(true)}
+                    />
+                  </selectedFilter.component>
+                ) : (
                   <Image 
                     source={{ uri: capturedPhoto }} 
                     style={{ flex: 1 }} 
                     resizeMode="cover" 
                     onLoadEnd={() => setPhotoLoaded(true)}
                   />
-                </selectedFilter.component>
-              ) : (
-                <Image 
-                  source={{ uri: capturedPhoto }} 
-                  style={{ flex: 1 }} 
-                  resizeMode="cover" 
-                  onLoadEnd={() => setPhotoLoaded(true)}
-                />
-              )}
-              {/* Apply overlay for filters that use overlayStyle or B&W */}
-              {selectedFilter.id === 'bw' ? (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: '#666666',
-                    opacity: 0.3,
-                  }}
-                />
-              ) : selectedFilter.overlayStyle ? (
-                <View
-                  style={{
-                    ...selectedFilter.overlayStyle,
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                  }}
-                />
-              ) : null}
-            </View>
-          ) : (
-            renderFilteredCamera()
-          )}
+                )}
+                {/* Apply overlay for filters that use overlayStyle or B&W */}
+                {selectedFilter.id === 'bw' ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: '#666666',
+                      opacity: 0.3,
+                    }}
+                  />
+                ) : selectedFilter.overlayStyle ? (
+                  <View
+                    style={{
+                      ...selectedFilter.overlayStyle,
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                    }}
+                  />
+                ) : null}
+              </View>
+            ) : (
+              renderFilteredCamera()
+            )}
+            
+            {/* Post options are now displayed in a full-screen Modal, overlay removed */}
+          </TouchableOpacity>
           
-          {/* No additional overlay needed - filters handled in renderFilteredCamera */}
-        </TouchableOpacity>
-        
-        <SafeAreaView style={{ 
-          position: 'absolute', 
-          top: 0, 
-          left: 0, 
-          right: 0, 
-          bottom: 0,
-          pointerEvents: 'box-none'
-        }}>
-          {/* Text overlays */}
-          {textOverlays.map((textOverlay) => (
-            <DraggableText key={`${textOverlay.id}-${textOverlay.isEditing}`} textOverlay={textOverlay} />
-          ))}
+          <SafeAreaView style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0,
+            pointerEvents: 'box-none'
+          }}>
+            {/* Text overlays */}
+            {textOverlays.map((textOverlay) => (
+              <DraggableText key={`${textOverlay.id}-${textOverlay.isEditing}`} textOverlay={textOverlay} />
+            ))}
 
-          <View style={{ flex: 1, justifyContent: 'space-between', opacity: controlsVisible ? 1 : 0 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
-              <TouchableOpacity 
-                onPress={() => router.push('/(modals)/settings')}
-                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
-              >
-                <Feather name="settings" size={24} color="white" />
-              </TouchableOpacity>
-              
-              {/* Camera Flip Button */}
-              <TouchableOpacity 
-                onPress={toggleCameraType}
-                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
-              >
-                <Ionicons name="camera-reverse" size={24} color="white" />
-              </TouchableOpacity>
-              
-              {/* Filter Indicator */}
-              {selectedFilter.id !== 'none' && (
-                <View style={{ 
-                  backgroundColor: 'rgba(0,0,0,0.6)', 
-                  borderRadius: 15, 
-                  paddingHorizontal: 12, 
-                  paddingVertical: 6,
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
-                    {selectedFilter.name}
-                  </Text>
-                  {selectedFilter.id === 'bw' && (
-                    <Text style={{ color: 'white', fontSize: 10, opacity: 0.8 }}>
-                      (applies to photo)
-                    </Text>
-                  )}
-                </View>
-              )}
-              
-              <TouchableOpacity 
-                onPress={toggleFlash} 
-                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
-              >
-                <Ionicons name={getFlashIcon()} size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Text Controls */}
-            {textOverlays.length > 0 && (
-              <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8 }}>
-                  <TouchableOpacity
-                    onPress={clearAllText}
-                    style={{ backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
-                  >
-                    <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Clear All</Text>
-                  </TouchableOpacity>
-                  
-                  {selectedTextId && (
-                    <>
-                      <TouchableOpacity
-                        onPress={() => deleteTextOverlay(selectedTextId)}
-                        style={{ backgroundColor: 'rgba(255,100,100,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Delete</Text>
-                      </TouchableOpacity>
-                      
-                      {/* Font Size Controls */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text && text.fontSize > 12) {
-                            updateTextOverlay(selectedTextId, { fontSize: text.fontSize - 2 });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A-</Text>
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text && text.fontSize < 48) {
-                            updateTextOverlay(selectedTextId, { fontSize: text.fontSize + 2 });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A+</Text>
-                      </TouchableOpacity>
-                      
-                      {/* Bold Toggle */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          const text = textOverlays.find(t => t.id === selectedTextId);
-                          if (text) {
-                            updateTextOverlay(selectedTextId, { 
-                              fontWeight: text.fontWeight === 'bold' ? 'normal' : 'bold' 
-                            });
-                          }
-                        }}
-                        style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
-                      >
-                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>B</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
+            { !postOptionsVisible && (
+            <View style={{ flex: 1, justifyContent: 'space-between', opacity: controlsVisible ? 1 : 0 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
+                <TouchableOpacity 
+                  onPress={() => router.push('/(modals)/settings')}
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+                >
+                  <Feather name="settings" size={24} color="white" />
+                </TouchableOpacity>
                 
-                {/* Color Picker for Selected Text */}
-                {selectedTextId && (
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 8 }}>
-                    {textColors.map((color) => (
-                      <TouchableOpacity
-                        key={color}
-                        onPress={() => updateTextOverlay(selectedTextId, { color })}
-                        style={{
-                          width: 24,
-                          height: 24,
-                          backgroundColor: color,
-                          borderRadius: 12,
-                          borderWidth: 2,
-                          borderColor: textOverlays.find(t => t.id === selectedTextId)?.color === color ? '#FFD700' : 'rgba(255,255,255,0.5)',
-                        }}
-                      />
-                    ))}
+                {/* Camera Flip Button */}
+                <TouchableOpacity 
+                  onPress={toggleCameraType}
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+                >
+                  <Ionicons name="camera-reverse" size={24} color="white" />
+                </TouchableOpacity>
+                
+                {/* Filter Indicator */}
+                {selectedFilter.id !== 'none' && (
+                  <View style={{ 
+                    backgroundColor: 'rgba(0,0,0,0.6)', 
+                    borderRadius: 15, 
+                    paddingHorizontal: 12, 
+                    paddingVertical: 6,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                      {selectedFilter.name}
+                    </Text>
+                    {selectedFilter.id === 'bw' && (
+                      <Text style={{ color: 'white', fontSize: 10, opacity: 0.8 }}>
+                        (applies to photo)
+                      </Text>
+                    )}
                   </View>
                 )}
-              </View>
-            )}
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16 }}>
-              {/* Text Button */}
-              <TouchableOpacity
-                onPress={addTextOverlay}
-                style={{
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  borderRadius: 25,
-                  padding: 12,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Feather name="type" size={24} color="white" />
-              </TouchableOpacity>
-
-              {/* Shutter Button */}
-              <TouchableOpacity 
-                onPress={capturePhoto}
-                disabled={isCapturing}
-                style={{
-                  width: 70,
-                  height: 70,
-                  borderRadius: 35,
-                  backgroundColor: isCapturing ? 'gray' : 'white',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: isCapturing ? 0.7 : 1
-                }}
-              >
-                {isCapturing ? (
-                  <Feather name="camera" size={24} color="black" />
-                ) : (
-                  <View style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: 30,
-                    backgroundColor: 'white',
-                    borderWidth: 3,
-                    borderColor: 'black'
-                  }} />
-                )}
-              </TouchableOpacity>
-
-              {/* Filter Button */}
-              <TouchableOpacity
-                onPress={() => setShowFilters(!showFilters)}
-                style={{
-                  backgroundColor: showFilters ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.2)',
-                  borderRadius: 25,
-                  padding: 12,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Feather name="filter" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Filter Selection */}
-            {showFilters && (
-              <View style={{ 
-                position: 'absolute', 
-                bottom: 120, 
-                left: 0, 
-                right: 0, 
-                backgroundColor: 'rgba(0,0,0,0.7)', 
-                paddingVertical: 10 
-              }}>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ paddingHorizontal: 16 }}
+                
+                <TouchableOpacity 
+                  onPress={toggleFlash} 
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
                 >
-                  {photoFilters.map(renderFilterPreview)}
-                </ScrollView>
+                  <Ionicons name={getFlashIcon()} size={24} color="white" />
+                </TouchableOpacity>
               </View>
+
+              {/* Text Controls */}
+              {textOverlays.length > 0 && (
+                <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={clearAllText}
+                      style={{ backgroundColor: 'rgba(255,0,0,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
+                    >
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Clear All</Text>
+                    </TouchableOpacity>
+                    
+                    {selectedTextId && (
+                      <>
+                        <TouchableOpacity
+                          onPress={() => deleteTextOverlay(selectedTextId)}
+                          style={{ backgroundColor: 'rgba(255,100,100,0.8)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 }}
+                        >
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Delete</Text>
+                        </TouchableOpacity>
+                        
+                        {/* Font Size Controls */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            const text = textOverlays.find(t => t.id === selectedTextId);
+                            if (text && text.fontSize > 12) {
+                              updateTextOverlay(selectedTextId, { fontSize: text.fontSize - 2 });
+                            }
+                          }}
+                          style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                        >
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A-</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity
+                          onPress={() => {
+                            const text = textOverlays.find(t => t.id === selectedTextId);
+                            if (text && text.fontSize < 48) {
+                              updateTextOverlay(selectedTextId, { fontSize: text.fontSize + 2 });
+                            }
+                          }}
+                          style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                        >
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>A+</Text>
+                        </TouchableOpacity>
+                        
+                        {/* Bold Toggle */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            const text = textOverlays.find(t => t.id === selectedTextId);
+                            if (text) {
+                              updateTextOverlay(selectedTextId, { 
+                                fontWeight: text.fontWeight === 'bold' ? 'normal' : 'bold' 
+                              });
+                            }
+                          }}
+                          style={{ backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 6 }}
+                        >
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>B</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </View>
+                  
+                  {/* Color Picker for Selected Text */}
+                  {selectedTextId && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, gap: 8 }}>
+                      {textColors.map((color) => (
+                        <TouchableOpacity
+                          key={color}
+                          onPress={() => updateTextOverlay(selectedTextId, { color })}
+                          style={{
+                            width: 24,
+                            height: 24,
+                            backgroundColor: color,
+                            borderRadius: 12,
+                            borderWidth: 2,
+                            borderColor: textOverlays.find(t => t.id === selectedTextId)?.color === color ? '#FFD700' : 'rgba(255,255,255,0.5)',
+                          }}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16 }}>
+                {/* Text Button */}
+                <TouchableOpacity
+                  onPress={addTextOverlay}
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.2)',
+                    borderRadius: 25,
+                    padding: 12,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Feather name="type" size={24} color="white" />
+                </TouchableOpacity>
+
+                {/* Shutter Button */}
+                <TouchableOpacity 
+                  onPress={capturePhoto}
+                  disabled={isCapturing}
+                  style={{
+                    width: 70,
+                    height: 70,
+                    borderRadius: 35,
+                    backgroundColor: isCapturing ? 'gray' : 'white',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: isCapturing ? 0.7 : 1
+                  }}
+                >
+                  {isCapturing ? (
+                    <Feather name="camera" size={24} color="black" />
+                  ) : (
+                    <View style={{
+                      width: 60,
+                      height: 60,
+                      borderRadius: 30,
+                      backgroundColor: 'white',
+                      borderWidth: 3,
+                      borderColor: 'black'
+                    }} />
+                  )}
+                </TouchableOpacity>
+
+                {/* Filter Button */}
+                <TouchableOpacity
+                  onPress={() => setShowFilters(!showFilters)}
+                  style={{
+                    backgroundColor: showFilters ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.2)',
+                    borderRadius: 25,
+                    padding: 12,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Feather name="filter" size={24} color="white" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Filter Selection */}
+              {showFilters && (
+                <View style={{ 
+                  position: 'absolute', 
+                  bottom: 120, 
+                  left: 0, 
+                  right: 0, 
+                  backgroundColor: 'rgba(0,0,0,0.7)', 
+                  paddingVertical: 10 
+                }}>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16 }}
+                  >
+                    {photoFilters.map(renderFilterPreview)}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
             )}
-          </View>
-        </SafeAreaView>
-      </View>
-    </GestureHandlerRootView>
+          </SafeAreaView>
+        </View>
+      </GestureHandlerRootView>
+
+      {/* Full-screen modal for post options */}
+      <Modal
+        visible={postOptionsVisible}
+        animationType="slide"
+        onRequestClose={resetCamera}
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+      >
+        <View style={{ flex: 1, backgroundColor: 'black' }}>
+          {capturedPhoto && (
+            <Image
+              source={{ uri: capturedPhoto }}
+              style={{ flex: 1 }}
+              resizeMode="contain"
+            />
+          )}
+
+          <SafeAreaView
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-around',
+              padding: 16,
+              backgroundColor: 'rgba(0,0,0,0.9)',
+            }}
+          >
+            <TouchableOpacity
+              onPress={sendPhoto}
+              style={{
+                backgroundColor: '#1e90ff',
+                paddingVertical: 12,
+                paddingHorizontal: 24,
+                borderRadius: 24,
+              }}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold' }}>Send To...</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={addStory}
+              style={{
+                backgroundColor: '#32c862',
+                paddingVertical: 12,
+                paddingHorizontal: 24,
+                borderRadius: 24,
+              }}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold' }}>Add to Story</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={resetCamera} style={{ paddingVertical: 12, paddingHorizontal: 16 }}>
+              <Text style={{ color: 'white' }}>Cancel</Text>
+            </TouchableOpacity>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+    </>
   );
 } 
