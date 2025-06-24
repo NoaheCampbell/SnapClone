@@ -2,7 +2,7 @@ import { View, Text, FlatList, TouchableOpacity, Image } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
 
 interface Chat {
@@ -24,8 +24,16 @@ export default function InboxScreen() {
   const [chats, setChats] = useState<Chat[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Refresh chats when the screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadChats()
+    }, [])
+  )
+
   useEffect(() => {
     let channel: any // RealtimeChannel – keep as any to avoid importing extra type
+    let refreshInterval: ReturnType<typeof setInterval>
 
     const initRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -34,8 +42,18 @@ export default function InboxScreen() {
       // Make sure we start with fresh data
       loadChats()
 
+      // Set up periodic refresh every 30 seconds as a fallback
+      refreshInterval = setInterval(() => {
+        loadChats()
+      }, 30000)
+
       channel = supabase
         .channel(`inbox:${user.id}`)
+        // Listen for broadcast events when users leave chats
+        .on('broadcast', { event: 'user-left-chat' }, (payload) => {
+          console.log('Received user-left-chat broadcast, refreshing chats')
+          loadChats()
+        })
         // Someone just added *this* user to a channel (a new chat was created)
         .on(
           'postgres_changes',
@@ -45,7 +63,24 @@ export default function InboxScreen() {
             table: 'channel_members',
             filter: `member_id=eq.${user.id}`,
           },
-          () => loadChats()
+          () => {
+            console.log('User added to channel, refreshing chats')
+            loadChats()
+          }
+        )
+        // Someone removed *this* user from a channel (they left or were removed)
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'channel_members',
+            filter: `member_id=eq.${user.id}`,
+          },
+          () => {
+            console.log('User removed from channel, refreshing chats')
+            loadChats()
+          }
         )
         // A brand-new message landed anywhere – cheaper to just refresh the list
         .on(
@@ -64,6 +99,7 @@ export default function InboxScreen() {
 
     return () => {
       if (channel) supabase.removeChannel(channel)
+      if (refreshInterval) clearInterval(refreshInterval)
     }
   }, [])
 

@@ -87,7 +87,13 @@ export default function ChatScreen() {
     try {
       const { data, error } = await supabase.rpc('get_chat_details', { p_channel_id: channelId })
 
-      if (error) throw error
+      if (error) {
+        // Check if the error is due to access denied (user no longer in chat)
+        if (error.message.includes('Access denied') || error.message.includes('not a member')) {
+          return // Silently fail for chat info, the main error will be caught in loadMessages
+        }
+        throw error
+      }
 
       const { is_group, participants } = data
       if (is_group) {
@@ -97,6 +103,7 @@ export default function ChatScreen() {
       }
     } catch (error) {
       console.error('Error loading chat info:', error)
+      // Don't show an alert here since loadMessages will handle the main error
     }
   }
 
@@ -104,11 +111,33 @@ export default function ChatScreen() {
     try {
       const { data, error } = await supabase.rpc('get_chat_messages', { p_channel_id: channelId })
       
-      if (error) throw error
+      if (error) {
+        // Check if the error is due to access denied (user no longer in chat)
+        if (error.message.includes('Access denied') || error.message.includes('not a member')) {
+          Alert.alert(
+            'Chat Unavailable',
+            'You are no longer a member of this chat.',
+            [{ 
+              text: 'OK', 
+              onPress: () => router.back() 
+            }]
+          )
+          return
+        }
+        throw error
+      }
 
       setMessages(data || [])
     } catch (error) {
       console.error('Error loading messages:', error)
+      Alert.alert(
+        'Error',
+        'Unable to load chat messages. You may no longer have access to this chat.',
+        [{ 
+          text: 'OK', 
+          onPress: () => router.back() 
+        }]
+      )
     } finally {
       setLoading(false)
     }
@@ -135,7 +164,22 @@ export default function ChatScreen() {
             sender_id: user.user.id,
             content: newMessage,
           })
-        if (error) throw error
+        
+        if (error) {
+          // Check if error is due to RLS policy (user not in channel)
+          if (error.message.includes('policy') || error.message.includes('denied')) {
+            Alert.alert(
+              'Unable to Send',
+              'You are no longer a member of this chat.',
+              [{ 
+                text: 'OK', 
+                onPress: () => router.back() 
+              }]
+            )
+            return
+          }
+          throw error
+        }
       }
 
       // Send media messages
@@ -147,6 +191,7 @@ export default function ChatScreen() {
       setSelectedMedia([])
     } catch (err) {
       console.error('Error sending message:', err)
+      Alert.alert('Error', 'Unable to send message. Please try again.')
     } finally {
       setSending(false)
     }
@@ -283,16 +328,30 @@ export default function ChatScreen() {
       const { data: auth } = await supabase.auth.getUser()
       if (!auth.user) return
 
-      await supabase
+      const { error } = await supabase
         .from('channel_members')
         .delete()
         .eq('channel_id', channelId)
         .eq('member_id', auth.user.id)
 
-      // After leaving, go back to inbox
+      if (error) {
+        console.error('Error leaving chat:', error)
+        Alert.alert('Error', 'Unable to leave chat. Please try again.')
+        return
+      }
+
+      // Broadcast an event to notify other parts of the app that the user left a chat
+      supabase.channel('chat-updates').send({
+        type: 'broadcast',
+        event: 'user-left-chat',
+        payload: { userId: auth.user.id, channelId }
+      })
+
+      // After leaving, go back to inbox immediately
       router.back()
     } catch (err) {
       console.error('Error leaving chat:', err)
+      Alert.alert('Error', 'Unable to leave chat. Please try again.')
     }
   }
 
