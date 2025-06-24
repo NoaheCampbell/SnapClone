@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
+import { router } from 'expo-router';
 
 // Check if running in Expo Go
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -131,7 +132,16 @@ export default function CameraScreen() {
       />
       <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
         <View style={{ flex: 1, justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 16 }}>
+            {/* Settings Button */}
+            <TouchableOpacity 
+              onPress={() => router.push('/(modals)/settings')}
+              style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+            >
+              <Feather name="settings" size={24} color="white" />
+            </TouchableOpacity>
+            
+            {/* Flash Toggle */}
             <TouchableOpacity 
               onPress={() => setTorchOn(!torchOn)} 
               style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}

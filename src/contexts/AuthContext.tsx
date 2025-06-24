@@ -192,14 +192,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string) => {
-    // Use a simple redirect URL that works for development
+    // Sign up without email verification
     const { data, error } = await supabase.auth.signUp({
       email,
-      password,
-      options: {
-        emailRedirectTo: 'https://app.supabase.com'
-      }
+      password
+      // Removed options to use default settings - email confirmation should be disabled in Supabase dashboard
     })
+    
+    // If signup successful and user is immediately confirmed (no email verification required)
+    if (!error && data.user && !data.user.email_confirmed_at) {
+      console.log('User created but not confirmed - this is expected when email confirmation is disabled')
+    }
+    
     return { error }
   }
 
@@ -236,8 +240,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const createProfile = async (username: string, displayName?: string) => {
     if (!user) {
-      return { error: 'No user found' }
+      const err = new Error('No user is available to create a profile.');
+      console.error('createProfile:', err);
+      return { error: err };
     }
+
+    console.log(`createProfile: Attempting to create profile for user: ${user.id}`);
+    console.log(`createProfile: Username: ${username}, Display Name: ${displayName}`);
 
     try {
       const { data, error } = await supabase
@@ -248,20 +257,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           display_name: displayName || username,
         })
         .select()
-        .single()
+        .single();
 
       if (error) {
-        return { error }
-      } else if (data) {
-        setProfile(data)
-        return { error: null }
-      } else {
-        return { error: 'No data returned' }
+        console.error('createProfile: Supabase error:', error);
+        return { error };
       }
-    } catch (error) {
-      return { error }
+      
+      if (data) {
+        console.log('createProfile: Profile created successfully:', data);
+        setProfile(data);
+        return { error: null };
+      }
+      
+      const unknownError = new Error('Failed to create profile: No data returned from Supabase.');
+      console.error('createProfile:', unknownError);
+      return { error: unknownError };
+
+    } catch (e: any) {
+      const err = e instanceof Error ? e : new Error('An unexpected error occurred during profile creation.');
+      console.error('createProfile: Caught exception:', err);
+      return { error: err };
     }
-  }
+  };
 
   const updateProfile = async (updates: Partial<Profile>) => {
     if (!user) return { error: 'No user found' }

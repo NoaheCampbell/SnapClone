@@ -31,27 +31,34 @@ export default function CreateProfileScreen() {
     setLoading(true)
     
     try {
-      const { error } = await createProfile(username.trim(), displayName.trim() || undefined)
+      console.log('handleCreateProfile: Starting...');
+      const { error } = await createProfile(username.trim(), displayName.trim() || undefined);
 
       if (error) {
-        if (error.code === '23505') {
-          Alert.alert('Username Taken', 'This username is already taken. Please choose another one.')
+        // The error from createProfile is now guaranteed to be an Error object or a Supabase error
+        console.error('handleCreateProfile: Failed!', error);
+        
+        // Check for Supabase unique constraint violation
+        if (error.message.includes('duplicate key value violates unique constraint')) {
+          Alert.alert('Username Taken', 'This username is already taken. Please choose another one.');
         } else {
-          Alert.alert('Error', error.message || 'Failed to create profile')
+          Alert.alert('Error Creating Profile', error.message || 'An unknown error occurred.');
         }
       } else {
+        console.log('handleCreateProfile: Success! Navigating...');
         // Small delay to ensure profile state updates
         setTimeout(() => {
-          router.replace('/')
-        }, 500)
+          router.replace('/');
+        }, 500);
       }
-    } catch (error) {
-      console.error('Unexpected error creating profile:', error)
-      Alert.alert('Error', 'An unexpected error occurred')
+    } catch (e: any) {
+      const err = e instanceof Error ? e : new Error('An unexpected error occurred.');
+      console.error('handleCreateProfile: Caught exception!', err);
+      Alert.alert('Error', err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-black">

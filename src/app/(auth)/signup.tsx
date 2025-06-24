@@ -37,8 +37,17 @@ export default function SignupScreen() {
     if (error) {
       Alert.alert('Signup Failed', error.message)
     } else {
-      // Navigate to confirmation screen
-      router.replace(`./confirm-email?email=${encodeURIComponent(email.trim())}` as any)
+      // Skip email confirmation and go directly to profile creation
+      Alert.alert(
+        'Account Created!',
+        'Your account has been created successfully. Please create your profile.',
+        [
+          {
+            text: 'Continue',
+            onPress: () => router.replace('./create-profile' as any)
+          }
+        ]
+      )
     }
     setLoading(false)
   }

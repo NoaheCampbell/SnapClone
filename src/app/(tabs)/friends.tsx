@@ -1,8 +1,7 @@
-import { View, Text, TextInput, TouchableOpacity, FlatList, Alert, Image } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert, Image, Modal, TextInput } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
-import { router } from 'expo-router'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../../lib/supabase'
 
@@ -14,6 +13,13 @@ interface Profile {
   created_at: string
 }
 
+interface Friend {
+  user_id: string
+  friend_id: string
+  created_at: string
+  friend_profile: Profile
+}
+
 interface FriendRequest {
   id: number
   from_id: string
@@ -23,22 +29,15 @@ interface FriendRequest {
   from_profile: Profile
 }
 
-interface Friend {
-  user_id: string
-  friend_id: string
-  created_at: string
-  friend_profile: Profile
-}
-
 export default function FriendsScreen() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'search'>('friends')
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showSearchModal, setShowSearchModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Profile[]>([])
-  const [friends, setFriends] = useState<Friend[]>([])
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
-  const [loading, setLoading] = useState(false)
-  const [searchTimeout, setSearchTimeout] = useState<number | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -47,49 +46,10 @@ export default function FriendsScreen() {
     }
   }, [user])
 
-  useEffect(() => {
-    if (!user) return
-
-    const reloadAllData = () => {
-      loadFriends()
-      loadFriendRequests()
-    }
-
-    const friendChanges = supabase.channel(`friends-changes:${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friends' }, reloadAllData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `to_id=eq.${user.id}` }, reloadAllData)
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(friendChanges)
-    }
-  }, [user])
-
-  // Debounced search effect
-  useEffect(() => {
-    if (searchTimeout) {
-      clearTimeout(searchTimeout)
-    }
-
-    if (searchQuery.trim()) {
-      const timeout = setTimeout(() => {
-        searchUsers(searchQuery)
-      }, 500) // 500ms debounce
-      setSearchTimeout(timeout)
-    } else {
-      setSearchResults([])
-    }
-
-    return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout)
-      }
-    }
-  }, [searchQuery])
-
   const loadFriends = async () => {
     if (!user) return
 
+    setLoading(true)
     try {
       const { data, error } = await supabase
         .from('friends')
@@ -106,6 +66,8 @@ export default function FriendsScreen() {
       }
     } catch (error) {
       console.error('Error loading friends:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -138,10 +100,9 @@ export default function FriendsScreen() {
       return
     }
 
-    setLoading(true)
+    setSearchLoading(true)
     
     try {
-      // Get all profiles and filter locally
       const { data: allProfiles, error } = await supabase
         .from('profiles')
         .select('*')
@@ -155,7 +116,7 @@ export default function FriendsScreen() {
       if (allProfiles) {
         const searchTerm = query.trim().toLowerCase()
         const filtered = allProfiles
-          .filter(profile => profile.user_id !== user.id) // Filter out current user
+          .filter(profile => profile.user_id !== user.id)
           .filter(profile => {
             const usernameMatch = profile.username?.toLowerCase().includes(searchTerm)
             const displayNameMatch = profile.display_name?.toLowerCase().includes(searchTerm)
@@ -170,12 +131,15 @@ export default function FriendsScreen() {
       console.error('Error searching users:', error)
       setSearchResults([])
     } finally {
-      setLoading(false)
+      setSearchLoading(false)
     }
   }
 
   const sendFriendRequest = async (toUserId: string) => {
-    if (!user) return
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to send friend requests.')
+      return
+    }
 
     try {
       const { error } = await supabase
@@ -187,18 +151,20 @@ export default function FriendsScreen() {
         })
 
       if (error) {
-        if (error.code === '23505') {
+        console.error('Error sending friend request:', error)
+        if (error.message.includes('duplicate key value')) {
           Alert.alert('Request Already Sent', 'You have already sent a friend request to this user.')
         } else {
-          Alert.alert('Error', 'Failed to send friend request')
+          Alert.alert('Error', `Failed to send friend request: ${error.message}`)
         }
       } else {
         Alert.alert('Success', 'Friend request sent!')
-        // Remove from search results
         setSearchResults(prev => prev.filter(p => p.user_id !== toUserId))
       }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to send friend request')
+    } catch (e: any) {
+      const err = e instanceof Error ? e : new Error('An unexpected error occurred.')
+      console.error('Caught exception in sendFriendRequest:', err)
+      Alert.alert('Error', err.message)
     }
   }
 
@@ -217,7 +183,6 @@ export default function FriendsScreen() {
       }
 
       if (status === 'accepted') {
-        // Add to friends table (bidirectional)
         const request = friendRequests.find(r => r.id === requestId)
         if (request) {
           const { error: friendError } = await supabase
@@ -274,108 +239,104 @@ export default function FriendsScreen() {
   }
 
   const renderFriend = ({ item }: { item: Friend }) => (
-    <View className="mx-4 mb-4 bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden">
-      <View className="flex-row items-center p-5">
-        <View className="relative">
-          {item.friend_profile.avatar_url ? (
-            <Image 
-              source={{ uri: item.friend_profile.avatar_url }} 
-              className="w-16 h-16 rounded-2xl shadow-xl"
-            />
-          ) : (
-            <View className="w-16 h-16 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-2xl items-center justify-center shadow-xl">
-              <Text className="text-white text-xl font-bold">
-                {(item.friend_profile.display_name || item.friend_profile.username).charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-black"></View>
-        </View>
-        <View className="ml-4 flex-1">
-          <Text className="text-white font-bold text-lg">{item.friend_profile.display_name || item.friend_profile.username}</Text>
-          <Text className="text-gray-300 text-sm">@{item.friend_profile.username}</Text>
-          <Text className="text-gray-400 text-xs mt-1">Online</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => removeFriend(item.friend_id)}
-          className="w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-2xl items-center justify-center"
-        >
-          <Feather name="user-minus" size={18} color="#ef4444" />
-        </TouchableOpacity>
+    <View className="mx-6 mb-4 bg-gray-800/50 rounded-2xl p-4 flex-row items-center">
+      <View className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mr-4">
+        {item.friend_profile.avatar_url ? (
+          <Image 
+            source={{ uri: item.friend_profile.avatar_url }} 
+            className="w-16 h-16 rounded-full"
+          />
+        ) : (
+          <Text className="text-white text-xl font-bold">
+            {item.friend_profile.display_name?.charAt(0) || item.friend_profile.username.charAt(0)}
+          </Text>
+        )}
       </View>
-    </View>
-  )
-
-  const renderFriendRequest = ({ item }: { item: FriendRequest }) => (
-    <View className="mx-4 mb-4 bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden">
-      <View className="p-5">
-        <View className="flex-row items-center mb-4">
-          <View className="relative">
-            {item.from_profile.avatar_url ? (
-              <Image 
-                source={{ uri: item.from_profile.avatar_url }} 
-                className="w-16 h-16 rounded-2xl shadow-xl"
-              />
-            ) : (
-              <View className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded-2xl items-center justify-center shadow-xl">
-                <Text className="text-white text-xl font-bold">
-                  {(item.from_profile.display_name || item.from_profile.username).charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
-            <View className="absolute -top-1 -right-1 w-6 h-6 bg-blue-500 rounded-full border-2 border-black items-center justify-center">
-              <Feather name="user-plus" size={12} color="white" />
-            </View>
-          </View>
-          <View className="ml-4 flex-1">
-            <Text className="text-white font-bold text-lg">{item.from_profile.display_name || item.from_profile.username}</Text>
-            <Text className="text-gray-300 text-sm">@{item.from_profile.username}</Text>
-            <Text className="text-blue-400 text-xs mt-1">wants to be your friend</Text>
-          </View>
-        </View>
-        <View className="flex-row space-x-3">
-          <TouchableOpacity
-            onPress={() => respondToFriendRequest(item.id, 'accepted')}
-            className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl py-4 items-center shadow-lg"
-          >
-            <Text className="text-white font-bold text-base">Accept</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => respondToFriendRequest(item.id, 'rejected')}
-            className="flex-1 bg-white/5 border border-white/10 rounded-2xl py-4 items-center"
-          >
-            <Text className="text-gray-300 font-bold text-base">Decline</Text>
-          </TouchableOpacity>
-        </View>
+      
+      <View className="flex-1">
+        <Text className="text-white text-lg font-bold">
+          {item.friend_profile.display_name || item.friend_profile.username}
+        </Text>
+        <Text className="text-gray-400 text-sm">@{item.friend_profile.username}</Text>
       </View>
+      
+      <TouchableOpacity
+        onPress={() => removeFriend(item.friend_id)}
+        className="w-10 h-10 bg-red-500/20 rounded-full items-center justify-center"
+      >
+        <Feather name="user-minus" size={16} color="#ef4444" />
+      </TouchableOpacity>
     </View>
   )
 
   const renderSearchResult = ({ item }: { item: Profile }) => (
-    <View className="mx-4 mb-4 bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden">
-      <View className="flex-row items-center p-5">
+    <View className="mx-6 mb-4 bg-gray-800/50 rounded-2xl p-4 flex-row items-center">
+      <View className="w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-full items-center justify-center mr-4">
         {item.avatar_url ? (
           <Image 
             source={{ uri: item.avatar_url }} 
-            className="w-16 h-16 rounded-2xl shadow-xl"
+            className="w-16 h-16 rounded-full"
           />
         ) : (
-          <View className="w-16 h-16 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 rounded-2xl items-center justify-center shadow-xl">
-            <Text className="text-white text-xl font-bold">
-              {(item.display_name || item.username).charAt(0).toUpperCase()}
-            </Text>
-          </View>
+          <Text className="text-white text-xl font-bold">
+            {item.display_name?.charAt(0) || item.username.charAt(0)}
+          </Text>
         )}
-        <View className="ml-4 flex-1">
-          <Text className="text-white font-bold text-lg">{item.display_name || item.username}</Text>
-          <Text className="text-gray-300 text-sm">@{item.username}</Text>
-          <Text className="text-gray-400 text-xs mt-1">Tap to add friend</Text>
+      </View>
+      
+      <View className="flex-1">
+        <Text className="text-white text-lg font-bold">
+          {item.display_name || item.username}
+        </Text>
+        <Text className="text-gray-400 text-sm">@{item.username}</Text>
+      </View>
+      
+      <TouchableOpacity
+        onPress={() => sendFriendRequest(item.user_id)}
+        className="bg-blue-500 px-4 py-2 rounded-full"
+      >
+        <Text className="text-white font-bold">Add</Text>
+      </TouchableOpacity>
+    </View>
+  )
+
+  const renderFriendRequest = ({ item }: { item: FriendRequest }) => (
+    <View className="mx-6 mb-4 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4">
+      <View className="flex-row items-center mb-3">
+        <View className="w-16 h-16 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full items-center justify-center mr-4">
+          {item.from_profile.avatar_url ? (
+            <Image 
+              source={{ uri: item.from_profile.avatar_url }} 
+              className="w-16 h-16 rounded-full"
+            />
+          ) : (
+            <Text className="text-white text-xl font-bold">
+              {item.from_profile.display_name?.charAt(0) || item.from_profile.username.charAt(0)}
+            </Text>
+          )}
         </View>
+        
+        <View className="flex-1">
+          <Text className="text-white text-lg font-bold">
+            {item.from_profile.display_name || item.from_profile.username}
+          </Text>
+          <Text className="text-gray-400 text-sm">@{item.from_profile.username}</Text>
+          <Text className="text-yellow-400 text-xs">wants to be your friend</Text>
+        </View>
+      </View>
+      
+      <View className="flex-row space-x-3">
         <TouchableOpacity
-          onPress={() => sendFriendRequest(item.user_id)}
-          className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 rounded-2xl shadow-lg"
+          onPress={() => respondToFriendRequest(item.id, 'accepted')}
+          className="flex-1 bg-green-500 rounded-xl py-3 items-center"
         >
-          <Text className="text-white font-bold text-base">Add</Text>
+          <Text className="text-white font-bold">Accept</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => respondToFriendRequest(item.id, 'rejected')}
+          className="flex-1 bg-red-500 rounded-xl py-3 items-center"
+        >
+          <Text className="text-white font-bold">Decline</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -383,200 +344,156 @@ export default function FriendsScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-black">
-      {/* Animated Background */}
-      <View className="absolute inset-0">
-        <View className="absolute top-0 left-0 w-72 h-72 bg-blue-500/20 rounded-full blur-3xl" />
-        <View className="absolute top-32 right-0 w-64 h-64 bg-purple-500/20 rounded-full blur-3xl" />
-        <View className="absolute bottom-32 left-8 w-56 h-56 bg-pink-500/20 rounded-full blur-3xl" />
-      </View>
-      
-      <View className="flex-1 relative">
-        {/* Header */}
-        <View className="px-6 py-6 bg-black/20 backdrop-blur-2xl border-b border-white/10">
-          <View className="flex-row items-center justify-between mb-6">
-            <View>
-              <Text className="text-white text-4xl font-black tracking-tight">Friends</Text>
-              <Text className="text-gray-400 text-sm mt-1">Connect with your network</Text>
-            </View>
-            <TouchableOpacity 
-              onPress={() => router.push('/(modals)/settings')}
-              className="w-12 h-12 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl items-center justify-center"
-            >
-              <Feather name="settings" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
-          
-          {/* Enhanced Tab Navigation */}
-          <View className="flex-row bg-black/30 backdrop-blur-2xl rounded-3xl p-2 border border-white/10">
-            <TouchableOpacity
-              onPress={() => setActiveTab('friends')}
-              className={`flex-1 py-4 rounded-2xl transition-all duration-300 ${
-                activeTab === 'friends' 
-                  ? 'bg-white/20 backdrop-blur-xl shadow-2xl' 
-                  : 'bg-transparent'
-              }`}
-            >
-              <Text className={`text-center font-bold ${
-                activeTab === 'friends' ? 'text-white' : 'text-gray-400'
-              }`}>
-                Friends
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('requests')}
-              className={`flex-1 py-4 rounded-2xl relative transition-all duration-300 ${
-                activeTab === 'requests' 
-                  ? 'bg-white/20 backdrop-blur-xl shadow-2xl' 
-                  : 'bg-transparent'
-              }`}
-            >
-              <Text className={`text-center font-bold ${
-                activeTab === 'requests' ? 'text-white' : 'text-gray-400'
-              }`}>
-                Requests
-              </Text>
-              {friendRequests.length > 0 && (
-                <View className="absolute -top-1 -right-1 w-6 h-6 bg-gradient-to-r from-red-500 to-pink-500 rounded-full items-center justify-center shadow-lg border-2 border-black">
-                  <Text className="text-white text-xs font-black">{friendRequests.length}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('search')}
-              className={`flex-1 py-4 rounded-2xl transition-all duration-300 ${
-                activeTab === 'search' 
-                  ? 'bg-white/20 backdrop-blur-xl shadow-2xl' 
-                  : 'bg-transparent'
-              }`}
-            >
-              <Text className={`text-center font-bold ${
-                activeTab === 'search' ? 'text-white' : 'text-gray-400'
-              }`}>
-                Search
-              </Text>
-            </TouchableOpacity>
-          </View>
+      {/* Header */}
+      <View className="px-6 py-4 flex-row items-center justify-between">
+        <View>
+          <Text className="text-white text-3xl font-bold">Friends</Text>
+          <Text className="text-gray-400 text-sm">{friends.length} friends</Text>
         </View>
-
-        {/* Enhanced Search Bar */}
-        {activeTab === 'search' && (
-          <View className="px-6 py-4">
-            <View className="bg-black/30 backdrop-blur-2xl rounded-3xl px-6 py-5 flex-row items-center border border-white/10 shadow-2xl">
-              <View className="w-8 h-8 bg-white/10 rounded-full items-center justify-center mr-4">
-                <Feather name="search" size={16} color="white" />
+        <View className="flex-row space-x-3">
+          {friendRequests.length > 0 && (
+            <View className="relative">
+              <View className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full items-center justify-center z-10">
+                <Text className="text-white text-xs font-bold">{friendRequests.length}</Text>
               </View>
+              <TouchableOpacity 
+                onPress={() => setShowSearchModal(true)}
+                className="w-12 h-12 bg-yellow-500 rounded-full items-center justify-center"
+              >
+                <Feather name="user-plus" size={20} color="white" />
+              </TouchableOpacity>
+            </View>
+          )}
+          <TouchableOpacity 
+            onPress={() => setShowSearchModal(true)}
+            className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
+          >
+            <Feather name="search" size={20} color="white" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Friends List */}
+      <View className="flex-1">
+        {loading ? (
+          <View className="flex-1 items-center justify-center">
+            <Text className="text-white text-lg">Loading friends...</Text>
+          </View>
+        ) : friends.length === 0 ? (
+          <View className="flex-1 items-center justify-center px-8">
+            <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
+              <Feather name="users" size={60} color="white" />
+            </View>
+            <Text className="text-white text-2xl font-bold text-center mb-4">No Friends Yet</Text>
+            <Text className="text-gray-400 text-center text-lg">
+              Start connecting with people to build your friend network
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={friends}
+            renderItem={renderFriend}
+            keyExtractor={(item) => `${item.user_id}-${item.friend_id}`}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}
+          />
+        )}
+      </View>
+
+      {/* Search Modal */}
+      <Modal
+        visible={showSearchModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <SafeAreaView className="flex-1 bg-black">
+          {/* Modal Header */}
+          <View className="px-6 py-4 flex-row items-center justify-between border-b border-gray-800">
+            <Text className="text-white text-2xl font-bold">Search & Requests</Text>
+            <TouchableOpacity 
+              onPress={() => {
+                setShowSearchModal(false)
+                setSearchQuery('')
+                setSearchResults([])
+              }}
+              className="w-10 h-10 bg-gray-800 rounded-full items-center justify-center"
+            >
+              <Feather name="x" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Search Bar */}
+          <View className="px-6 py-4">
+            <View className="bg-gray-800 rounded-xl px-4 py-3 flex-row items-center">
+              <Feather name="search" size={20} color="gray" />
               <TextInput
                 value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search for friends..."
-                placeholderTextColor="#6B7280"
-                className="flex-1 text-white text-lg font-medium"
+                onChangeText={(text) => {
+                  setSearchQuery(text)
+                  searchUsers(text)
+                }}
+                placeholder="Search for users..."
+                placeholderTextColor="gray"
+                className="flex-1 text-white text-lg ml-3"
                 autoCapitalize="none"
                 autoCorrect={false}
               />
             </View>
           </View>
-        )}
 
-        {/* Content */}
-        <View className="flex-1">
-          {activeTab === 'friends' && (
-            <View className="flex-1">
-              {friends.length === 0 ? (
-                <View className="flex-1 items-center justify-center px-8">
-                  <View className="w-40 h-40 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-full items-center justify-center mb-12 shadow-2xl">
-                    <Feather name="users" size={80} color="white" />
-                  </View>
-                  <Text className="text-white text-3xl font-black text-center mb-6">Your Friend Circle Awaits</Text>
-                  <Text className="text-gray-300 text-center text-lg leading-relaxed mb-12 max-w-sm">
-                    Start building meaningful connections and expand your social network
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setActiveTab('search')}
-                    className="bg-gradient-to-r from-blue-600 to-purple-600 px-12 py-5 rounded-3xl shadow-2xl"
-                  >
-                    <Text className="text-white font-black text-xl">Discover Friends</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <FlatList
-                  data={friends}
-                  renderItem={renderFriend}
-                  keyExtractor={(item) => `${item.user_id}-${item.friend_id}`}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingTop: 16, paddingBottom: 32 }}
-                />
-              )}
-            </View>
-          )}
-
-          {activeTab === 'requests' && (
-            <View className="flex-1">
-              {friendRequests.length === 0 ? (
-                <View className="flex-1 items-center justify-center px-8">
-                  <View className="w-40 h-40 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded-full items-center justify-center mb-12 shadow-2xl">
-                    <Feather name="user-plus" size={80} color="white" />
-                  </View>
-                  <Text className="text-white text-3xl font-black text-center mb-6">No Pending Requests</Text>
-                  <Text className="text-gray-300 text-center text-lg leading-relaxed max-w-sm">
-                    When someone wants to connect with you, their request will appear here
-                  </Text>
-                </View>
-              ) : (
+          {/* Content */}
+          <View className="flex-1">
+            {/* Friend Requests Section */}
+            {friendRequests.length > 0 && (
+              <View>
+                <Text className="text-white text-xl font-bold px-6 py-2">Friend Requests</Text>
                 <FlatList
                   data={friendRequests}
                   renderItem={renderFriendRequest}
                   keyExtractor={(item) => item.id.toString()}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingTop: 16, paddingBottom: 32 }}
                 />
-              )}
-            </View>
-          )}
+              </View>
+            )}
 
-          {activeTab === 'search' && (
-            <View className="flex-1">
-              {searchQuery.trim() === '' ? (
-                <View className="flex-1 items-center justify-center px-8">
-                  <View className="w-40 h-40 bg-gradient-to-br from-indigo-500 via-blue-500 to-cyan-500 rounded-full items-center justify-center mb-12 shadow-2xl">
-                    <Feather name="compass" size={80} color="white" />
+            {/* Search Results Section */}
+            {searchQuery.trim() !== '' && (
+              <View className="flex-1">
+                <Text className="text-white text-xl font-bold px-6 py-2">Search Results</Text>
+                {searchLoading ? (
+                  <View className="flex-1 items-center justify-center">
+                    <Text className="text-white text-lg">Searching...</Text>
                   </View>
-                  <Text className="text-white text-3xl font-black text-center mb-6">Discover New People</Text>
-                  <Text className="text-gray-300 text-center text-lg leading-relaxed max-w-sm">
-                    Search by username or display name to find friends and connect with them
-                  </Text>
-                </View>
-              ) : loading ? (
-                <View className="flex-1 items-center justify-center">
-                  <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8 shadow-2xl">
-                    <Feather name="search" size={64} color="white" />
+                ) : searchResults.length === 0 ? (
+                  <View className="flex-1 items-center justify-center px-8">
+                    <Text className="text-gray-400 text-lg text-center">No users found</Text>
                   </View>
-                  <Text className="text-white text-2xl font-bold">Searching...</Text>
-                  <Text className="text-gray-400 text-lg mt-2">Finding amazing people</Text>
+                ) : (
+                  <FlatList
+                    data={searchResults}
+                    renderItem={renderSearchResult}
+                    keyExtractor={(item) => item.user_id}
+                    showsVerticalScrollIndicator={false}
+                  />
+                )}
+              </View>
+            )}
+
+            {/* Empty State */}
+            {searchQuery.trim() === '' && friendRequests.length === 0 && (
+              <View className="flex-1 items-center justify-center px-8">
+                <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
+                  <Feather name="search" size={60} color="white" />
                 </View>
-              ) : searchResults.length === 0 ? (
-                <View className="flex-1 items-center justify-center px-8">
-                  <View className="w-40 h-40 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 rounded-full items-center justify-center mb-12 shadow-2xl">
-                    <Feather name="search" size={80} color="white" />
-                  </View>
-                  <Text className="text-white text-3xl font-black text-center mb-6">No Results Found</Text>
-                  <Text className="text-gray-300 text-center text-lg leading-relaxed max-w-sm">
-                    Try searching with a different username or display name
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={searchResults}
-                  renderItem={renderSearchResult}
-                  keyExtractor={(item) => item.user_id}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingTop: 16, paddingBottom: 32 }}
-                />
-              )}
-            </View>
-          )}
-        </View>
-      </View>
+                <Text className="text-white text-2xl font-bold text-center mb-4">Search for Friends</Text>
+                <Text className="text-gray-400 text-center text-lg">
+                  Type a username or display name to find people to connect with
+                </Text>
+              </View>
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   )
 }
