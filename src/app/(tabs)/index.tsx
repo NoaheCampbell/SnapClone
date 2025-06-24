@@ -178,23 +178,11 @@ export default function CameraScreen() {
   }, []);
 
   const toggleFlash = useCallback(() => {
-    setFlashMode(current => {
-      switch (current) {
-        case 'off': return 'on';
-        case 'on': return 'auto';
-        case 'auto': return 'off';
-        default: return 'off';
-      }
-    });
+    setFlashMode(prev => (prev === 'off' ? 'on' : 'off'));
   }, []);
 
   const getFlashIcon = () => {
-    switch (flashMode) {
-      case 'on': return 'flash';
-      case 'auto': return 'flash-outline';
-      case 'off': return 'flash-off';
-      default: return 'flash-off';
-    }
+    return flashMode === 'on' ? 'flash' : 'flash-off';
   };
 
   const capturePhoto = useCallback(async () => {
@@ -431,6 +419,7 @@ export default function CameraScreen() {
             }}
             facing={cameraType}
             flash={flashMode}
+            enableTorch={flashMode==='on'}
           />
           {/* Subtle overlay to indicate B&W mode - real conversion happens on capture */}
           <View
@@ -455,6 +444,7 @@ export default function CameraScreen() {
         style={{ flex: 1 }}
         facing={cameraType}
         flash={flashMode}
+        enableTorch={flashMode==='on'}
       />
     );
 
