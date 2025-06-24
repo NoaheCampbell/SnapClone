@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Alert, Image, Switch, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Image, Switch, StyleSheet, ScrollView } from 'react-native';
 import ThemeToggle from '../../components/ThemeToggle';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -11,6 +11,7 @@ import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
 import { useColorScheme } from '../../../components/useColorScheme';
 import Colors from '../../../constants/Colors';
+import * as SecureStore from 'expo-secure-store';
 
 export default function SettingsModal() {
   const { signOut, profile, refreshProfile } = useAuth();
@@ -23,6 +24,7 @@ export default function SettingsModal() {
     show_stories_to_friends_only: false,
   });
   const [loading, setLoading] = useState(true);
+  const [hasApiKey, setHasApiKey] = useState(false);
 
   useEffect(() => {
     const getCurrentTheme = async () => {
@@ -31,7 +33,78 @@ export default function SettingsModal() {
     };
     getCurrentTheme();
     loadPrivacySettings();
+    checkApiKey();
   }, []);
+
+  const checkApiKey = async () => {
+    try {
+      // Prefer environment variable if provided at build time
+      const envKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+      if (envKey && envKey.trim()) {
+        setHasApiKey(true);
+        return;
+      }
+
+      // Fallback to SecureStore
+      const apiKey = await SecureStore.getItemAsync('openai_api_key');
+      setHasApiKey(!!apiKey);
+    } catch (error) {
+      console.error('Error checking API key:', error);
+    }
+  };
+
+  const manageApiKey = () => {
+    // If key is supplied via env, inform the user it can't be changed here
+    const envKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+    if (envKey && envKey.trim()) {
+      Alert.alert('OpenAI API Key', 'The API key is provided via an environment variable and cannot be modified in the app.');
+      return;
+    }
+
+    if (hasApiKey) {
+      Alert.alert(
+        'OpenAI API Key',
+        'You have an API key stored. What would you like to do?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Update Key', 
+            onPress: () => promptForApiKey()
+          },
+          { 
+            text: 'Remove Key', 
+            style: 'destructive',
+            onPress: async () => {
+              await SecureStore.deleteItemAsync('openai_api_key');
+              setHasApiKey(false);
+              Alert.alert('Success', 'API key removed');
+            }
+          }
+        ]
+      );
+    } else {
+      promptForApiKey();
+    }
+  };
+
+  const promptForApiKey = () => {
+    Alert.prompt(
+      'OpenAI API Key',
+      'Enter your OpenAI API key to enable AI chat suggestions:',
+      async (key) => {
+        if (key && key.trim()) {
+          try {
+            await SecureStore.setItemAsync('openai_api_key', key.trim());
+            setHasApiKey(true);
+            Alert.alert('Success', 'API key saved securely');
+          } catch (error) {
+            Alert.alert('Error', 'Failed to save API key');
+          }
+        }
+      },
+      'secure-text'
+    );
+  };
 
   const loadPrivacySettings = async () => {
     if (!profile) return;
@@ -170,7 +243,7 @@ export default function SettingsModal() {
         </TouchableOpacity>
       </View>
       
-      <View className="flex-1">
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
         {profile && (
           <View className="p-4 border-b border-gray-800">
@@ -284,11 +357,11 @@ export default function SettingsModal() {
             </View>
           </View>
 
-          <Text className="text-white text-lg font-bold mb-4 mt-8">Account</Text>
+          <Text className="text-white text-lg font-bold mb-4 mt-4">Account</Text>
         </View>
 
         {/* Sign Out */}
-        <View className="p-4">
+        <View className="p-4 pb-8">
           <TouchableOpacity 
             onPress={handleSignOut}
             className="flex-row items-center py-3"
@@ -297,7 +370,7 @@ export default function SettingsModal() {
             <Text className="text-red-500 text-base font-medium ml-3">Sign Out</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

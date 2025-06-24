@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, Alert, TextInput, StyleSheet, Image, ScrollView, Modal } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { Camera, CameraView, CameraType, FlashMode } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
@@ -32,6 +32,7 @@ export default function CameraScreen() {
   const [hasMediaLibraryPermission, setHasMediaLibraryPermission] = useState<boolean | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [pendingCapture, setPendingCapture] = useState(false);
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
@@ -51,6 +52,9 @@ export default function CameraScreen() {
 
   // Text colors
   const textColors = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'];
+
+  // Store captured uri from onLoadEnd capture
+  const captureResultRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     (async () => {
@@ -158,10 +162,10 @@ export default function CameraScreen() {
             borderColor: '#007AFF',
           }}
         >
-          <Ionicons 
-            name={filter.icon as any} 
-            size={24} 
-            color={isSelected ? 'white' : '#999'} 
+          <Feather
+            name={filter.icon as any}
+            size={24}
+            color={isSelected ? 'white' : '#999'}
           />
         </View>
         <Text
@@ -186,7 +190,7 @@ export default function CameraScreen() {
   }, []);
 
   const getFlashIcon = () => {
-    return flashMode === 'on' ? 'flash' : 'flash-off';
+    return flashMode === 'on' ? 'zap' : 'zap-off';
   };
 
   const capturePhoto = useCallback(async () => {
@@ -209,44 +213,31 @@ export default function CameraScreen() {
 
       let finalUri = photo.uri;
 
-      // If a filter is selected, render the captured photo with overlay and capture it using view-shot
+      // If a filter is selected, we need to render the captured photo with overlay and
+      // then snapshot the combined view.  To avoid the race condition where the
+      // snapshot occurs before the <Image> finishes decoding (resulting in a solid
+      // coloured frame), we defer captureRef until the Image's onLoadEnd fires.
       if (selectedFilter.id !== 'none') {
-        // Show captured photo with overlay
         setCapturedPhoto(photo.uri);
         setPhotoLoaded(false);
-        // Hide UI controls while capturing (optional)
         setControlsVisible(false);
+        setPendingCapture(true);
 
-        // Wait until the image preview has loaded (max 2s)
-        await Promise.race([
-          new Promise(resolve => {
-            const checkLoaded = () => {
-              if (photoLoaded) {
-                resolve(true);
-              } else {
-                setTimeout(checkLoaded, 50);
-              }
-            };
-            checkLoaded();
-          }),
-          new Promise(res => setTimeout(res, 2000)),
-        ]);
+        // Wait until onLoadEnd triggers the capture (with a safety timeout)
+        await new Promise(res => setTimeout(res, 3500));
 
-        // Capture the container view (image + overlay)
-        if (containerRef.current) {
-          try {
-            const capturedUri = await captureRef(containerRef.current, {
-              format: 'jpg',
-              quality: 0.9,
-            });
-            finalUri = capturedUri;
-            console.log('Filtered image captured:', capturedUri);
-          } catch (err) {
-            console.warn('Failed to capture filtered image, falling back to original', err);
-          }
+        if (pendingCapture) {
+          // onLoadEnd never fired within timeout — fall back
+          console.warn('Image did not finish loading in time; using original photo');
+          setPendingCapture(false);
         }
 
-        // keep controls hidden; capturedPhoto kept for preview
+        // After onLoadEnd captures container, finalUri should be updated via ref
+        // We store it in a ref so we can update here
+        if ((captureResultRef.current)) {
+          finalUri = captureResultRef.current;
+          captureResultRef.current = undefined;
+        }
       }
 
       // Store finalUri and show post options modal
@@ -551,7 +542,23 @@ export default function CameraScreen() {
                       source={{ uri: capturedPhoto }} 
                       style={{ flex: 1 }} 
                       resizeMode="cover" 
-                      onLoadEnd={() => setPhotoLoaded(true)}
+                      onLoadEnd={async () => {
+                        setPhotoLoaded(true);
+                        if (pendingCapture && containerRef.current) {
+                          try {
+                            const capturedUri = await captureRef(containerRef.current, {
+                              format: 'jpg',
+                              quality: 0.9,
+                            });
+                            captureResultRef.current = capturedUri;
+                            console.log('Filtered image captured after load:', capturedUri);
+                          } catch (err) {
+                            console.warn('Failed to capture filtered image after load', err);
+                          } finally {
+                            setPendingCapture(false);
+                          }
+                        }
+                      }}
                     />
                   </selectedFilter.component>
                 ) : (
@@ -559,7 +566,23 @@ export default function CameraScreen() {
                     source={{ uri: capturedPhoto }} 
                     style={{ flex: 1 }} 
                     resizeMode="cover" 
-                    onLoadEnd={() => setPhotoLoaded(true)}
+                    onLoadEnd={async () => {
+                      setPhotoLoaded(true);
+                      if (pendingCapture && containerRef.current) {
+                        try {
+                          const capturedUri = await captureRef(containerRef.current, {
+                            format: 'jpg',
+                            quality: 0.9,
+                          });
+                          captureResultRef.current = capturedUri;
+                          console.log('Filtered image captured after load:', capturedUri);
+                        } catch (err) {
+                          console.warn('Failed to capture filtered image after load', err);
+                        } finally {
+                          setPendingCapture(false);
+                        }
+                      }
+                    }}
                   />
                 )}
                 {/* Apply overlay for filters that use overlayStyle or B&W */}
@@ -623,7 +646,7 @@ export default function CameraScreen() {
                   onPress={toggleCameraType}
                   style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
                 >
-                  <Ionicons name="camera-reverse" size={24} color="white" />
+                  <Feather name="refresh-ccw" size={24} color="white" />
                 </TouchableOpacity>
                 
                 {/* Filter Indicator */}
@@ -651,7 +674,7 @@ export default function CameraScreen() {
                   onPress={toggleFlash} 
                   style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
                 >
-                  <Ionicons name={getFlashIcon()} size={24} color="white" />
+                  <Feather name={getFlashIcon()} size={24} color="white" />
                 </TouchableOpacity>
               </View>
 

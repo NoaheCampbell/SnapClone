@@ -8,6 +8,54 @@ import * as ImagePicker from 'expo-image-picker'
 import { Video, ResizeMode } from 'expo-av'
 import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system'
+import * as SecureStore from 'expo-secure-store'
+
+// Secure API key storage
+const OPENAI_API_KEY_STORAGE = 'openai_api_key'
+
+// Helper function to get API key securely
+const getOpenAIKey = async () => {
+  // 1. Prefer build-time environment variable if defined (e.g. via .env.local or EAS secrets)
+  const envKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY
+  if (envKey && envKey.trim()) {
+    return envKey.trim()
+  }
+  try {
+    let apiKey = await SecureStore.getItemAsync(OPENAI_API_KEY_STORAGE)
+    
+    // If no key stored, prompt user to enter it (one-time setup)
+    if (!apiKey) {
+      Alert.alert(
+        'OpenAI API Key Required',
+        'Please enter your OpenAI API key to enable AI chat suggestions.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Enter Key', 
+            onPress: () => {
+              Alert.prompt(
+                'OpenAI API Key',
+                'Enter your OpenAI API key:',
+                async (key) => {
+                  if (key) {
+                    await SecureStore.setItemAsync(OPENAI_API_KEY_STORAGE, key)
+                  }
+                },
+                'secure-text'
+              )
+            }
+          }
+        ]
+      )
+      return null
+    }
+    
+    return apiKey
+  } catch (error) {
+    console.error('Error getting OpenAI key:', error)
+    return null
+  }
+}
 
 interface Message {
   id: number
@@ -37,6 +85,8 @@ export default function ChatScreen() {
     type: string
     name: string
   }>>([])
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
@@ -509,8 +559,79 @@ export default function ChatScreen() {
   useEffect(() => {
     if (messages.length > 0) {
       markMessagesAsRead()
+      // Generate suggestions after a short delay to avoid too many API calls
+      const timer = setTimeout(() => {
+        generateSuggestions()
+      }, 1000)
+      return () => clearTimeout(timer)
     }
   }, [messages])
+
+  // Generate AI suggestions based on recent messages
+  const generateSuggestions = async () => {
+    if (messages.length === 0 || loadingSuggestions) return
+    
+    const apiKey = await getOpenAIKey()
+    if (!apiKey) {
+      console.log('❌ No OpenAI API key available')
+      return
+    }
+    
+    setLoadingSuggestions(true)
+    try {
+      // Get the last few messages for context (limit to recent conversation)
+      const recentMessages = messages.slice(-5).map(m => 
+        `${m.is_own_message ? 'Me' : m.sender_name}: ${m.content}`
+      ).join('\n')
+      
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini', // Cheap and fast model
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant that suggests 3 short, natural reply options for casual chat conversations. Keep responses brief (1-8 words), friendly, and appropriate for the context. Return only the 3 suggestions separated by newlines, no numbering or extra text.'
+            },
+            {
+              role: 'user',
+              content: `Based on this conversation, suggest 3 good reply options:\n\n${recentMessages}`
+            }
+          ],
+          max_tokens: 100,
+          temperature: 0.7,
+        }),
+      })
+
+      const data = await response.json()
+      
+      if (data.choices && data.choices[0]?.message?.content) {
+        const suggestedReplies = data.choices[0].message.content
+          .trim()
+          .split('\n')
+          .filter((s: string) => s.trim().length > 0)
+          .slice(0, 3) // Ensure max 3 suggestions
+        
+        setSuggestions(suggestedReplies)
+      }
+    } catch (error) {
+      console.error('Error generating suggestions:', error)
+      // Fallback to simple suggestions if AI fails
+      setSuggestions(['👍', 'Sounds good!', 'Thanks!'])
+    } finally {
+      setLoadingSuggestions(false)
+    }
+  }
+
+  // Handle suggestion selection
+  const selectSuggestion = (suggestion: string) => {
+    setNewMessage(suggestion)
+    setSuggestions([]) // Hide suggestions after selection
+  }
 
   if (loading) {
     return (
@@ -556,6 +677,27 @@ export default function ChatScreen() {
 
         {/* Message Input Container */}
         <View className="bg-black border-t border-gray-800">
+          {/* AI Suggestions */}
+          {suggestions.length > 0 && (
+            <View className="px-4 py-2">
+              <View className="flex-row items-center mb-2">
+                <Feather name="zap" size={14} color="#60A5FA" />
+                <Text className="text-blue-400 text-xs ml-1 font-medium">Quick replies</Text>
+              </View>
+              <View className="flex-row flex-wrap">
+                {suggestions.map((suggestion, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    onPress={() => selectSuggestion(suggestion)}
+                    className="bg-gray-700 rounded-full px-3 py-2 mr-2 mb-2"
+                  >
+                    <Text className="text-white text-sm">{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+          
           {/* Media Previews */}
           {selectedMedia.length > 0 && (
             <View className="px-4 pt-3 pb-2 bg-black">
@@ -599,7 +741,13 @@ export default function ChatScreen() {
             <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-3 mr-3 min-h-[44px]">
               <TextInput
                 value={newMessage}
-                onChangeText={setNewMessage}
+                onChangeText={(text) => {
+                  setNewMessage(text)
+                  // Clear suggestions when user starts typing
+                  if (text.length > 0 && suggestions.length > 0) {
+                    setSuggestions([])
+                  }
+                }}
                 placeholder="Type a message..."
                 placeholderTextColor="#9CA3AF"
                 className="flex-1 text-white text-base"
@@ -608,8 +756,27 @@ export default function ChatScreen() {
                 style={{ minHeight: 20, maxHeight: 100 }}
               />
             </View>
+            
+            {/* Suggestion refresh button */}
+            {!newMessage.trim() && messages.length > 0 && (
+              <TouchableOpacity
+                onPress={generateSuggestions}
+                disabled={loadingSuggestions}
+                className="w-11 h-11 rounded-full items-center justify-center bg-gray-700 mr-2"
+              >
+                <Feather 
+                  name={loadingSuggestions ? "loader" : "zap"} 
+                  size={18} 
+                  color="#60A5FA" 
+                />
+              </TouchableOpacity>
+            )}
+            
             <TouchableOpacity
-              onPress={sendMessage}
+              onPress={() => {
+                sendMessage()
+                setSuggestions([]) // Clear suggestions after sending
+              }}
               disabled={(!newMessage.trim() && selectedMedia.length === 0) || sending}
               className={`w-11 h-11 rounded-full items-center justify-center ${
                 (newMessage.trim() || selectedMedia.length > 0) && !sending ? 'bg-blue-500' : 'bg-gray-600'
