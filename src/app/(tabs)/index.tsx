@@ -172,6 +172,9 @@ export default function CameraScreen() {
         throw new Error('Failed to capture photo');
       }
 
+      // Hide UI controls so they don't appear in the snapshot
+      setControlsVisible(false);
+
       // Render the captured photo inside the view hierarchy so view-shot can grab it
       setCapturedPhoto(photo.uri);
       setPhotoLoaded(false);
@@ -210,6 +213,7 @@ export default function CameraScreen() {
 
       // Reset
       setCapturedPhoto(null);
+      setControlsVisible(true);
     } catch (error) {
       console.error('Error taking photo:', error);
       Alert.alert(
