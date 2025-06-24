@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -160,6 +160,38 @@ export default function ChatScreen() {
     </View>
   )
 
+  // -----------------------------------------------------------------
+  // Leave / delete chat (remove current user from channel)
+  // -----------------------------------------------------------------
+  const leaveChat = async () => {
+    try {
+      const { data: auth } = await supabase.auth.getUser()
+      if (!auth.user) return
+
+      await supabase
+        .from('channel_members')
+        .delete()
+        .eq('channel_id', channelId)
+        .eq('member_id', auth.user.id)
+
+      // After leaving, go back to inbox
+      router.back()
+    } catch (err) {
+      console.error('Error leaving chat:', err)
+    }
+  }
+
+  const confirmLeaveChat = () => {
+    Alert.alert(
+      'Leave this chat?',
+      'You will no longer see this conversation in your inbox.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: leaveChat }
+      ]
+    )
+  }
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black">
@@ -184,8 +216,8 @@ export default function ChatScreen() {
           <Text className="text-white text-lg font-semibold flex-1">
             {chatTitle}
           </Text>
-          <TouchableOpacity>
-            <Feather name="more-vertical" size={24} color="white" />
+          <TouchableOpacity onPress={confirmLeaveChat}>
+            <Feather name="trash-2" size={22} color="white" />
           </TouchableOpacity>
         </View>
 

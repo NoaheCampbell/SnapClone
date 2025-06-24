@@ -78,47 +78,56 @@ export default function NewChatScreen() {
 
     try {
       setCreating(true)
-      const { data: user } = await supabase.auth.getUser()
-      if (!user.user) return
+      const { data: auth } = await supabase.auth.getUser()
+      if (!auth.user) return
 
-      console.log('Creating channel...')
-      // Create channel
+      const myId = auth.user.id
+
+      // -----------------------------------------------------------
+      // 1. Check for an existing chat with *exactly* this member set
+      // -----------------------------------------------------------
+      const desiredMemberIds = [myId, ...selectedFriends].sort()
+
+      const { data: existingChats, error: existingErr } = await supabase
+        .rpc('get_user_chats')
+
+      if (existingErr) throw existingErr
+
+      if (existingChats && existingChats.length > 0) {
+        const match = (existingChats as any[]).find(chat => {
+          // existing RPC returns participants array without current user
+          const participantIds = [myId, ...chat.participants?.map((p: any) => p.user_id) ?? []].sort()
+          return participantIds.length === desiredMemberIds.length &&
+            participantIds.every((id: string, idx: number) => id === desiredMemberIds[idx])
+        })
+
+        if (match) {
+          // Chat already exists – just navigate
+          router.replace(`/(modals)/chat?channelId=${match.id}`)
+          return
+        }
+      }
+
+      // -----------------------------------------------------------
+      // 2. No existing chat – create a new channel and add members
+      // -----------------------------------------------------------
       const { data: channel, error: channelError } = await supabase
         .from('channels')
-        .insert({
-          is_group: selectedFriends.length > 1
-        })
+        .insert({ is_group: selectedFriends.length > 1 })
         .select()
         .single()
 
-      if (channelError) {
-        console.error('Channel creation error:', channelError)
-        throw channelError
-      }
+      if (channelError) throw channelError
 
-      console.log('Channel created successfully:', channel.id)
-      console.log('Adding members...')
-
-      // Add current user to channel
-      const members = [user.user.id, ...selectedFriends]
-      console.log('Members to add:', members)
-      
+      const members = [myId, ...selectedFriends]
       const { error: membersError } = await supabase
         .from('channel_members')
         .insert(
-          members.map(memberId => ({
-            channel_id: channel.id,
-            member_id: memberId
-          }))
+          members.map(memberId => ({ channel_id: channel.id, member_id: memberId }))
         )
 
-      if (membersError) {
-        console.error('Members addition error:', membersError)
-        throw membersError
-      }
+      if (membersError) throw membersError
 
-      console.log('Members added successfully')
-      // Navigate to the new chat
       router.replace(`/(modals)/chat?channelId=${channel.id}`)
     } catch (error) {
       console.error('Error creating chat:', error)
