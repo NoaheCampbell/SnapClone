@@ -207,10 +207,9 @@ export default function CameraScreen() {
 
     try {
       setIsCapturing(true);
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: false,
-      });
+      console.log('Taking picture...');
+      
+      const photo = await cameraRef.current.takePictureAsync();
 
       if (!photo?.uri) {
         throw new Error('Failed to capture photo');
@@ -218,15 +217,15 @@ export default function CameraScreen() {
 
       let finalUri = photo.uri;
 
-      // Apply real filter if one is selected and has a component
-      if (selectedFilter.component) {
-        console.log(`Applying real ${selectedFilter.name} filter to captured photo...`);
-        
-        // Create a temporary image element to apply the filter
+      // If a filter is selected, render the captured photo with overlay and capture it using view-shot
+      if (selectedFilter.id !== 'none') {
+        // Show captured photo with overlay
         setCapturedPhoto(photo.uri);
         setPhotoLoaded(false);
-        
-        // Wait for the image to load so we can capture it with the filter applied
+        // Hide UI controls while capturing (optional)
+        setControlsVisible(false);
+
+        // Wait until the image preview has loaded (max 2s)
         await Promise.race([
           new Promise(resolve => {
             const checkLoaded = () => {
@@ -238,27 +237,31 @@ export default function CameraScreen() {
             };
             checkLoaded();
           }),
-          new Promise(res => setTimeout(res, 2000)) // 2 second timeout
+          new Promise(res => setTimeout(res, 2000)),
         ]);
 
-        // Capture the filtered image using view-shot
+        // Capture the container view (image + overlay)
         if (containerRef.current) {
           try {
-            const filteredUri = await captureRef(containerRef.current, {
+            const capturedUri = await captureRef(containerRef.current, {
               format: 'jpg',
               quality: 0.9,
             });
-            finalUri = filteredUri;
-            console.log(`Filter applied successfully. Filtered: ${filteredUri}`);
-          } catch (error) {
-            console.warn('Failed to capture filtered image, using original:', error);
+            finalUri = capturedUri;
+            console.log('Filtered image captured:', capturedUri);
+          } catch (err) {
+            console.warn('Failed to capture filtered image, falling back to original', err);
           }
         }
+
+        // Restore UI
+        setControlsVisible(true);
+        setCapturedPhoto(null);
       }
 
       // Save to media library
-      const asset = await MediaLibrary.createAssetAsync(finalUri);
-      console.log('Photo saved:', asset.uri);
+      await MediaLibrary.saveToLibraryAsync(finalUri);
+      console.log('Photo saved to library:', finalUri);
       
       Alert.alert(
         'Photo Saved!', 
@@ -564,6 +567,14 @@ export default function CameraScreen() {
                 style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
               >
                 <Feather name="settings" size={24} color="white" />
+              </TouchableOpacity>
+              
+              {/* Camera Flip Button */}
+              <TouchableOpacity 
+                onPress={toggleCameraType}
+                style={{ backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 8 }}
+              >
+                <Ionicons name="camera-reverse" size={24} color="white" />
               </TouchableOpacity>
               
               {/* Filter Indicator */}
