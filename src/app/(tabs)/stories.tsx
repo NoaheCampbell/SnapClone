@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FlatList, Image, Pressable, View, Text, ActivityIndicator } from 'react-native';
+import { FlatList, Image, Pressable, View, Text, ActivityIndicator, useColorScheme } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
+import Colors from '../../../constants/Colors';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface StoryRow {
   id: string;
@@ -30,6 +32,8 @@ export default function StoriesTab() {
   const { user } = useAuth();
   const [items, setItems] = useState<UserLatestStory[]>([]);
   const [loading, setLoading] = useState(true);
+  const scheme = useColorScheme() ?? 'light';
+  const theme = Colors[scheme];
 
   const loadStories = useCallback(async () => {
     if (!user) return;
@@ -148,7 +152,7 @@ export default function StoriesTab() {
           height: 68,
           borderRadius: 34,
           padding: 3,
-          backgroundColor: item.unseen ? '#3399ff' : '#cccccc',
+          backgroundColor: item.unseen ? theme.tint : theme.tabIconDefault,
         }}
       >
         <Image
@@ -157,20 +161,20 @@ export default function StoriesTab() {
           resizeMode="cover"
         />
       </View>
-      <Text style={{ marginTop: 4, fontSize: 12, color: '#000' }} numberOfLines={1}>
+      <Text style={{ marginTop: 4, fontSize: 12, color: theme.text }} numberOfLines={1}>
         {item.user_id === user.id ? 'Your Story' : item.username}
       </Text>
     </Pressable>
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top','left','right']}>
       <FlatList
         data={items}
         keyExtractor={(i) => i.user_id}
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingVertical: 16, paddingHorizontal: 8, paddingRight: 120 }}
+        contentContainerStyle={{ paddingVertical: 32, paddingHorizontal: 8, paddingRight: 120 }}
         renderItem={renderItem}
         refreshing={loading}
         onRefresh={loadStories}
@@ -186,15 +190,15 @@ export default function StoriesTab() {
           width: 56,
           height: 56,
           borderRadius: 28,
-          backgroundColor: '#3399ff',
+          backgroundColor: theme.tint,
           alignItems: 'center',
           justifyContent: 'center',
           elevation: 5,
           zIndex: 2,
         }}
       >
-        <Text style={{ color: '#fff', fontSize: 32, lineHeight: 32 }}>+</Text>
+        <Text style={{ color: theme.background, fontSize: 32, lineHeight: 32 }}>+</Text>
       </Pressable>
-    </View>
+    </SafeAreaView>
   );
 }
