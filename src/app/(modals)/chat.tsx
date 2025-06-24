@@ -62,18 +62,24 @@ export default function ChatScreen() {
             
             const { data: { user } } = await supabase.auth.getUser()
 
-            setMessages(currentMessages => [
-              ...currentMessages,
-              {
-                id: newMessage.id,
-                content: newMessage.content,
-                sender_id: newMessage.sender_id,
-                created_at: newMessage.created_at,
-                sender_name: profile?.username || 'Unknown',
-                is_own_message: newMessage.sender_id === (user?.id || ''),
-                media_url: newMessage.media_url,
-              }
-            ])
+            setMessages(currentMessages => {
+              // Check if message already exists to prevent duplicates
+              const messageExists = currentMessages.some(m => m.id === newMessage.id)
+              if (messageExists) return currentMessages
+              
+              return [
+                ...currentMessages,
+                {
+                  id: newMessage.id,
+                  content: newMessage.content,
+                  sender_id: newMessage.sender_id,
+                  created_at: newMessage.created_at,
+                  sender_name: profile?.username || 'Unknown',
+                  is_own_message: newMessage.sender_id === (user?.id || ''),
+                  media_url: newMessage.media_url,
+                }
+              ]
+            })
           }
         )
         .on(
@@ -181,22 +187,28 @@ export default function ChatScreen() {
   const sendMessage = async () => {
     if ((!newMessage.trim() && selectedMedia.length === 0) || sending) return
 
+    const messageText = newMessage.trim()
+    setNewMessage('') // Clear input immediately for better UX
+
     try {
       setSending(true)
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
       // Send text message if there's text
-      if (newMessage.trim()) {
-        const { error } = await supabase
+      if (messageText) {
+        const { data, error } = await supabase
           .from('messages')
           .insert({
             channel_id: channelId,
             sender_id: user.id,
-            content: newMessage,
+            content: messageText,
           })
+          .select()
         
         if (error) {
+          // Restore message text on error
+          setNewMessage(messageText)
           // Check if error is due to RLS policy (user not in channel)
           if (error.message.includes('policy') || error.message.includes('denied')) {
             Alert.alert(
@@ -218,7 +230,6 @@ export default function ChatScreen() {
         await uploadAndSendMedia(media, user.id)
       }
 
-      setNewMessage('')
       setSelectedMedia([])
     } catch (err) {
       console.error('Error sending message:', err)

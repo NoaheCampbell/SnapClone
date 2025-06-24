@@ -29,6 +29,7 @@ interface AuthContextType {
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: any }>
   refreshProfile: () => Promise<void>
   resendConfirmation: (email: string) => Promise<{ error: any }>
+  updateLastActive: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -103,6 +104,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (session?.user) {
           debouncedLoadProfile(session.user.id)
+          // Update last active when user signs in
+          if (event === 'SIGNED_IN') {
+            setTimeout(async () => {
+              try {
+                await supabase
+                  .from('profiles')
+                  .update({ last_active: new Date().toISOString() })
+                  .eq('user_id', session.user.id)
+              } catch (error) {
+                console.error('Error updating last active on sign in:', error)
+              }
+            }, 1000) // Wait a bit for profile to load
+          }
         } else {
           setProfile(null)
           setLoading(false)
@@ -316,6 +330,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error }
   }
 
+  const updateLastActive = async () => {
+    if (user?.id) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          last_active: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating last active:', error)
+      } else if (data) {
+        setProfile(data)
+      }
+    }
+  }
+
   const value = {
     user,
     profile,
@@ -329,6 +362,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     updateProfile,
     refreshProfile,
     resendConfirmation,
+    updateLastActive,
   }
 
   return (

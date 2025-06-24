@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Alert, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Alert, Image, Switch, StyleSheet } from 'react-native';
 import ThemeToggle from '../../components/ThemeToggle';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -9,10 +9,64 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
+import { useColorScheme } from '../../../components/useColorScheme';
+import Colors from '../../../constants/Colors';
 
 export default function SettingsModal() {
   const { signOut, profile, refreshProfile } = useAuth();
   const [uploading, setUploading] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(false);
+  const [privacySettings, setPrivacySettings] = useState({
+    is_private: false,
+    allow_friend_requests: true,
+    show_last_active: true,
+    show_stories_to_friends_only: false,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const getCurrentTheme = async () => {
+      const colorScheme = useColorScheme();
+      setIsEnabled(colorScheme === 'dark');
+    };
+    getCurrentTheme();
+    loadPrivacySettings();
+  }, []);
+
+  const loadPrivacySettings = async () => {
+    if (!profile) return;
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_private, allow_friend_requests, show_last_active, show_stories_to_friends_only')
+        .eq('user_id', profile.user_id)
+        .single();
+      
+      if (error) throw error;
+      if (data) {
+        setPrivacySettings(data);
+      }
+    } catch (error) {
+      console.error('Error loading privacy settings:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updatePrivacySetting = async (key: keyof typeof privacySettings, value: boolean) => {
+    if (!profile) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ [key]: value })
+        .eq('user_id', profile.user_id);
+      
+      if (error) throw error;
+      setPrivacySettings(prev => ({ ...prev, [key]: value }));
+    } catch (error) {
+      console.error('Error updating privacy setting:', error);
+    }
+  };
 
   const pickAvatar = async () => {
     try {
@@ -158,6 +212,79 @@ export default function SettingsModal() {
         {/* Theme Toggle */}
         <View className="p-4 border-b border-gray-800">
           <ThemeToggle />
+        </View>
+
+        {/* Privacy Settings */}
+        <View className="p-4 border-b border-gray-800">
+          <Text className="text-white text-lg font-bold mb-4">Privacy Settings</Text>
+          
+          <View className="space-y-4">
+            <View className="flex-row items-center justify-between p-4 bg-gray-800 rounded-lg">
+              <View className="flex-row items-center flex-1">
+                <Feather name="lock" size={20} color="white" style={{ marginRight: 12 }} />
+                <View className="flex-1">
+                  <Text className="text-white font-medium">Private Account</Text>
+                  <Text className="text-gray-400 text-sm">Only approved followers can see your content</Text>
+                </View>
+              </View>
+              <Switch
+                value={privacySettings.is_private}
+                onValueChange={(value) => updatePrivacySetting('is_private', value)}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={privacySettings.is_private ? '#f5dd4b' : '#f4f3f4'}
+              />
+            </View>
+
+            <View className="flex-row items-center justify-between p-4 bg-gray-800 rounded-lg">
+              <View className="flex-row items-center flex-1">
+                <Feather name="user-plus" size={20} color="white" style={{ marginRight: 12 }} />
+                <View className="flex-1">
+                  <Text className="text-white font-medium">Allow Friend Requests</Text>
+                  <Text className="text-gray-400 text-sm">Let others send you friend requests</Text>
+                </View>
+              </View>
+              <Switch
+                value={privacySettings.allow_friend_requests}
+                onValueChange={(value) => updatePrivacySetting('allow_friend_requests', value)}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={privacySettings.allow_friend_requests ? '#f5dd4b' : '#f4f3f4'}
+              />
+            </View>
+
+            <View className="flex-row items-center justify-between p-4 bg-gray-800 rounded-lg">
+              <View className="flex-row items-center flex-1">
+                <Feather name="clock" size={20} color="white" style={{ marginRight: 12 }} />
+                <View className="flex-1">
+                  <Text className="text-white font-medium">Show Last Active</Text>
+                  <Text className="text-gray-400 text-sm">Let friends see when you were last active</Text>
+                </View>
+              </View>
+              <Switch
+                value={privacySettings.show_last_active}
+                onValueChange={(value) => updatePrivacySetting('show_last_active', value)}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={privacySettings.show_last_active ? '#f5dd4b' : '#f4f3f4'}
+              />
+            </View>
+
+            <View className="flex-row items-center justify-between p-4 bg-gray-800 rounded-lg">
+              <View className="flex-row items-center flex-1">
+                <Feather name="eye" size={20} color="white" style={{ marginRight: 12 }} />
+                <View className="flex-1">
+                  <Text className="text-white font-medium">Stories Privacy</Text>
+                  <Text className="text-gray-400 text-sm">Only show stories to friends</Text>
+                </View>
+              </View>
+              <Switch
+                value={privacySettings.show_stories_to_friends_only}
+                onValueChange={(value) => updatePrivacySetting('show_stories_to_friends_only', value)}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={privacySettings.show_stories_to_friends_only ? '#f5dd4b' : '#f4f3f4'}
+              />
+            </View>
+          </View>
+
+          <Text className="text-white text-lg font-bold mb-4 mt-8">Account</Text>
         </View>
 
         {/* Sign Out */}

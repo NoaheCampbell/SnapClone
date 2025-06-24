@@ -17,6 +17,8 @@ interface StoryRow {
   profiles: {
     username: string;
     avatar_url: string | null;
+    show_stories_to_friends_only: boolean;
+    is_private: boolean;
   } | null;
 }
 
@@ -38,9 +40,11 @@ export default function StoriesTab() {
   const loadStories = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    
+    // First get all valid stories with user profiles and privacy settings
     const { data, error } = await supabase
       .from('stories')
-      .select('id,user_id,media_url,created_at,seen_by,profiles(username,avatar_url)')
+      .select('id,user_id,media_url,created_at,seen_by,profiles(username,avatar_url,show_stories_to_friends_only,is_private)')
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false });
 
@@ -50,9 +54,32 @@ export default function StoriesTab() {
       return;
     }
 
+    // Get user's friends list to check privacy settings
+    const { data: friendsData } = await supabase
+      .from('friends')
+      .select('friend_id')
+      .eq('user_id', user.id);
+
+    const friendIds = new Set(friendsData?.map(f => f.friend_id) || []);
+
     const map = new Map<string, StoryRow>();
     ((data ?? []) as any[]).forEach((raw) => {
       const row = raw as StoryRow;
+      
+      // Skip if this user has stories privacy enabled and current user is not a friend
+      if (row.profiles?.show_stories_to_friends_only && 
+          row.user_id !== user.id && 
+          !friendIds.has(row.user_id)) {
+        return;
+      }
+
+      // Skip if this is a private account and current user is not a friend
+      if (row.profiles?.is_private && 
+          row.user_id !== user.id && 
+          !friendIds.has(row.user_id)) {
+        return;
+      }
+      
       if (!map.has(row.user_id)) {
         map.set(row.user_id, row);
       }

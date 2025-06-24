@@ -11,6 +11,11 @@ interface Profile {
   display_name?: string
   avatar_url?: string
   created_at: string
+  is_private?: boolean
+  allow_friend_requests?: boolean
+  show_last_active?: boolean
+  show_stories_to_friends_only?: boolean
+  last_active?: string
 }
 
 interface Friend {
@@ -46,6 +51,24 @@ export default function FriendsScreen() {
     }
   }, [user])
 
+  const formatLastActive = (lastActive?: string) => {
+    if (!lastActive) return null
+    
+    const now = new Date()
+    const lastActiveDate = new Date(lastActive)
+    const diffMs = now.getTime() - lastActiveDate.getTime()
+    const diffMinutes = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    
+    if (diffMinutes < 5) return 'Active now'
+    if (diffMinutes < 60) return `Active ${diffMinutes}m ago`
+    if (diffHours < 24) return `Active ${diffHours}h ago`
+    if (diffDays === 1) return 'Active yesterday'
+    if (diffDays < 7) return `Active ${diffDays}d ago`
+    return null // Don't show if more than a week
+  }
+
   const loadFriends = async () => {
     if (!user) return
 
@@ -55,7 +78,7 @@ export default function FriendsScreen() {
         .from('friends')
         .select(`
           *,
-          friend_profile:profiles!friends_friend_id_fkey(*)
+          friend_profile:profiles!friends_friend_id_fkey(*, last_active, show_last_active)
         `)
         .eq('user_id', user.id)
 
@@ -103,6 +126,14 @@ export default function FriendsScreen() {
     setSearchLoading(true)
     
     try {
+      // Get current user's friends list to check if private accounts are already friends
+      const { data: friendsData } = await supabase
+        .from('friends')
+        .select('friend_id')
+        .eq('user_id', user.id);
+
+      const friendIds = new Set(friendsData?.map(f => f.friend_id) || []);
+
       const { data: allProfiles, error } = await supabase
         .from('profiles')
         .select('*')
@@ -121,6 +152,19 @@ export default function FriendsScreen() {
             const usernameMatch = profile.username?.toLowerCase().includes(searchTerm)
             const displayNameMatch = profile.display_name?.toLowerCase().includes(searchTerm)
             return usernameMatch || displayNameMatch
+          })
+          // Filter out private accounts that don't allow friend requests
+          .filter(profile => {
+            // If allow_friend_requests is false, don't show in search
+            return profile.allow_friend_requests !== false
+          })
+          // Filter out private accounts unless they're already friends
+          .filter(profile => {
+            // If account is private and user is not already a friend, don't show in search
+            if (profile.is_private && !friendIds.has(profile.user_id)) {
+              return false
+            }
+            return true
           })
         
         setSearchResults(filtered)
@@ -142,6 +186,23 @@ export default function FriendsScreen() {
     }
 
     try {
+      const { data: targetProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('allow_friend_requests, username')
+        .eq('user_id', toUserId)
+        .single()
+
+      if (profileError) {
+        console.error('Error checking user profile:', profileError)
+        Alert.alert('Error', 'Failed to send friend request.')
+        return
+      }
+
+      if (targetProfile.allow_friend_requests === false) {
+        Alert.alert('Cannot Send Request', `${targetProfile.username || 'This user'} is not accepting friend requests.`)
+        return
+      }
+
       const { error } = await supabase
         .from('friend_requests')
         .insert({
@@ -258,6 +319,11 @@ export default function FriendsScreen() {
           {item.friend_profile.display_name || item.friend_profile.username}
         </Text>
         <Text className="text-gray-400 text-sm">@{item.friend_profile.username}</Text>
+        {item.friend_profile.show_last_active && (
+          <Text className="text-gray-500 text-xs mt-1">
+            {formatLastActive(item.friend_profile.last_active)}
+          </Text>
+        )}
       </View>
       
       <TouchableOpacity
