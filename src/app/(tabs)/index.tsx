@@ -415,6 +415,37 @@ export default function CameraScreen() {
   const renderFilteredCamera = () => {
     // For live camera preview, we'll use overlays since color matrix filters don't work with CameraView
     // The real filters will be applied to captured photos
+    
+    // Special handling for B&W to simulate grayscale
+    if (selectedFilter.id === 'bw') {
+      console.log(`Applying B&W filter preview`);
+      return (
+        <View style={{ flex: 1 }}>
+          <CameraView
+            ref={cameraRef}
+            style={{ 
+              flex: 1,
+            }}
+            facing={cameraType}
+            flash={flashMode}
+          />
+          {/* Subtle overlay to indicate B&W mode - real conversion happens on capture */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#666666',
+              opacity: 0.3,
+              pointerEvents: 'none',
+            }}
+          />
+        </View>
+      );
+    }
+    
     const cameraView = (
       <CameraView
         ref={cameraRef}
@@ -424,8 +455,10 @@ export default function CameraScreen() {
       />
     );
 
-    // Always return camera with potential overlay - real filters applied on capture
+    // Apply other overlays normally
     if (selectedFilter.overlayStyle) {
+      console.log(`Applying overlay for filter: ${selectedFilter.name}`, selectedFilter.overlayStyle);
+      
       return (
         <View style={{ flex: 1 }}>
           {cameraView}
@@ -546,6 +579,11 @@ export default function CameraScreen() {
                   <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
                     {selectedFilter.name}
                   </Text>
+                  {selectedFilter.id === 'bw' && (
+                    <Text style={{ color: 'white', fontSize: 10, opacity: 0.8 }}>
+                      (applies to photo)
+                    </Text>
+                  )}
                 </View>
               )}
               

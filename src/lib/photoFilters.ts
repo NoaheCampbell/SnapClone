@@ -29,12 +29,7 @@ export const photoFilters: FilterConfig[] = [
     name: 'B&W', 
     icon: 'square',
     component: Grayscale,
-    overlayStyle: {
-      // Preview overlay - gray tint to simulate B&W
-      backgroundColor: '#808080',
-      opacity: 0.4,
-      mixBlendMode: 'multiply'
-    }
+    // No overlayStyle - handled specially in camera component
   },
   { 
     id: 'invert', 
