@@ -27,6 +27,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: any }>
   createProfile: (username: string, displayName?: string) => Promise<{ error: any }>
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: any }>
+  refreshProfile: () => Promise<void>
   resendConfirmation: (email: string) => Promise<{ error: any }>
 }
 
@@ -279,6 +280,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error }
   }
 
+  const refreshProfile = async () => {
+    if (user?.id) {
+      await loadProfile(user.id)
+    }
+  }
+
   const resendConfirmation = async (email: string) => {
     // Use a simple redirect URL that works for development
     const { data, error } = await supabase.auth.resend({
@@ -302,6 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signInWithGoogle,
     createProfile,
     updateProfile,
+    refreshProfile,
     resendConfirmation,
   }
 

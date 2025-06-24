@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, FlatList, Alert } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, FlatList, Alert, Image } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -277,11 +277,18 @@ export default function FriendsScreen() {
     <View className="mx-4 mb-4 bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden">
       <View className="flex-row items-center p-5">
         <View className="relative">
-          <View className="w-16 h-16 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-2xl items-center justify-center shadow-xl">
-            <Text className="text-white text-xl font-bold">
-              {(item.friend_profile.display_name || item.friend_profile.username).charAt(0).toUpperCase()}
-            </Text>
-          </View>
+          {item.friend_profile.avatar_url ? (
+            <Image 
+              source={{ uri: item.friend_profile.avatar_url }} 
+              className="w-16 h-16 rounded-2xl shadow-xl"
+            />
+          ) : (
+            <View className="w-16 h-16 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-2xl items-center justify-center shadow-xl">
+              <Text className="text-white text-xl font-bold">
+                {(item.friend_profile.display_name || item.friend_profile.username).charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
           <View className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-black"></View>
         </View>
         <View className="ml-4 flex-1">
@@ -304,11 +311,18 @@ export default function FriendsScreen() {
       <View className="p-5">
         <View className="flex-row items-center mb-4">
           <View className="relative">
-            <View className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded-2xl items-center justify-center shadow-xl">
-              <Text className="text-white text-xl font-bold">
-                {(item.from_profile.display_name || item.from_profile.username).charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            {item.from_profile.avatar_url ? (
+              <Image 
+                source={{ uri: item.from_profile.avatar_url }} 
+                className="w-16 h-16 rounded-2xl shadow-xl"
+              />
+            ) : (
+              <View className="w-16 h-16 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded-2xl items-center justify-center shadow-xl">
+                <Text className="text-white text-xl font-bold">
+                  {(item.from_profile.display_name || item.from_profile.username).charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
             <View className="absolute -top-1 -right-1 w-6 h-6 bg-blue-500 rounded-full border-2 border-black items-center justify-center">
               <Feather name="user-plus" size={12} color="white" />
             </View>
@@ -340,11 +354,18 @@ export default function FriendsScreen() {
   const renderSearchResult = ({ item }: { item: Profile }) => (
     <View className="mx-4 mb-4 bg-white/5 backdrop-blur-xl rounded-3xl border border-white/10 overflow-hidden">
       <View className="flex-row items-center p-5">
-        <View className="w-16 h-16 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 rounded-2xl items-center justify-center shadow-xl">
-          <Text className="text-white text-xl font-bold">
-            {(item.display_name || item.username).charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        {item.avatar_url ? (
+          <Image 
+            source={{ uri: item.avatar_url }} 
+            className="w-16 h-16 rounded-2xl shadow-xl"
+          />
+        ) : (
+          <View className="w-16 h-16 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 rounded-2xl items-center justify-center shadow-xl">
+            <Text className="text-white text-xl font-bold">
+              {(item.display_name || item.username).charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
         <View className="ml-4 flex-1">
           <Text className="text-white font-bold text-lg">{item.display_name || item.username}</Text>
           <Text className="text-gray-300 text-sm">@{item.username}</Text>
