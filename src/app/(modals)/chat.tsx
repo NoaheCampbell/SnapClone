@@ -1,6 +1,6 @@
 import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
@@ -22,6 +22,7 @@ interface Message {
 
 export default function ChatScreen() {
   const { channelId } = useLocalSearchParams<{ channelId: string }>()
+  const insets = useSafeAreaInsets()
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [loading, setLoading] = useState(true)
@@ -36,6 +37,9 @@ export default function ChatScreen() {
     type: string
     name: string
   }>>([])
+
+  // Calculate keyboard offset including header height and safe area
+  const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
 
   useEffect(() => {
     if (channelId) {
@@ -536,7 +540,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView 
         className="flex-1" 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        keyboardVerticalOffset={keyboardOffset}
       >
         {/* Messages */}
         <FlatList
