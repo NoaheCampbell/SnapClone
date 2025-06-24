@@ -47,6 +47,24 @@ export default function FriendsScreen() {
     }
   }, [user])
 
+  useEffect(() => {
+    if (!user) return
+
+    const reloadAllData = () => {
+      loadFriends()
+      loadFriendRequests()
+    }
+
+    const friendChanges = supabase.channel(`friends-changes:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friends' }, reloadAllData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `to_id=eq.${user.id}` }, reloadAllData)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(friendChanges)
+    }
+  }, [user])
+
   // Debounced search effect
   useEffect(() => {
     if (searchTimeout) {

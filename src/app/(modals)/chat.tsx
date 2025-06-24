@@ -37,14 +37,34 @@ export default function ChatScreen() {
             table: 'messages',
             filter: `channel_id=eq.${channelId}`
           },
-          (payload) => {
-            loadMessages()
+          async (payload) => {
+            const newMessage = payload.new as any
+            // We need to get the sender's profile to display their name
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('username')
+              .eq('user_id', newMessage.sender_id)
+              .single()
+            
+            const { data: { user } } = await supabase.auth.getUser()
+
+            setMessages(currentMessages => [
+              ...currentMessages,
+              {
+                id: newMessage.id,
+                content: newMessage.content,
+                sender_id: newMessage.sender_id,
+                created_at: newMessage.created_at,
+                sender_name: profile?.username || 'Unknown',
+                is_own_message: newMessage.sender_id === user?.id
+              }
+            ])
           }
         )
         .subscribe()
 
       return () => {
-        subscription.unsubscribe()
+        supabase.removeChannel(subscription)
       }
     }
   }, [channelId])

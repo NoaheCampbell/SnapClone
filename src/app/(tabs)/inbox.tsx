@@ -25,13 +25,45 @@ export default function InboxScreen() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadChats()
-    const channel = supabase.channel('inbox-changes')
-      .on('postgres_changes', { event: '*', schema: 'public' }, loadChats)
-      .subscribe()
+    let channel: any // RealtimeChannel – keep as any to avoid importing extra type
+
+    const initRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Make sure we start with fresh data
+      loadChats()
+
+      channel = supabase
+        .channel(`inbox:${user.id}`)
+        // Someone just added *this* user to a channel (a new chat was created)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'channel_members',
+            filter: `member_id=eq.${user.id}`,
+          },
+          () => loadChats()
+        )
+        // A brand-new message landed anywhere – cheaper to just refresh the list
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          },
+          () => loadChats()
+        )
+        .subscribe()
+    }
+
+    initRealtime()
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [])
 
