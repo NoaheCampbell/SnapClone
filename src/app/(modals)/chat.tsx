@@ -319,23 +319,24 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-black">
+      {/* Header */}
+      <View className="flex-row items-center p-4 border-b border-gray-800">
+        <TouchableOpacity onPress={() => router.back()} className="mr-4">
+          <Feather name="arrow-left" size={24} color="white" />
+        </TouchableOpacity>
+        <Text className="text-white text-lg font-semibold flex-1">
+          {chatTitle}
+        </Text>
+        <TouchableOpacity onPress={confirmLeaveChat}>
+          <Feather name="trash-2" size={22} color="white" />
+        </TouchableOpacity>
+      </View>
+
       <KeyboardAvoidingView 
         className="flex-1" 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
       >
-        {/* Header */}
-        <View className="flex-row items-center p-4 border-b border-gray-800">
-          <TouchableOpacity onPress={() => router.back()} className="mr-4">
-            <Feather name="arrow-left" size={24} color="white" />
-          </TouchableOpacity>
-          <Text className="text-white text-lg font-semibold flex-1">
-            {chatTitle}
-          </Text>
-          <TouchableOpacity onPress={confirmLeaveChat}>
-            <Feather name="trash-2" size={22} color="white" />
-          </TouchableOpacity>
-        </View>
-
         {/* Messages */}
         <FlatList
           ref={flatListRef}
@@ -343,15 +344,16 @@ export default function ChatScreen() {
           renderItem={renderMessage}
           keyExtractor={(item) => item.id.toString()}
           className="flex-1 px-4"
+          contentContainerStyle={{ paddingBottom: 10 }}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         />
 
-        {/* Message Input */}
-        <View className="border-t border-gray-800">
+        {/* Message Input Container */}
+        <View className="bg-black border-t border-gray-800">
           {/* Media Previews */}
           {selectedMedia.length > 0 && (
-            <View className="px-4 pt-3 pb-2">
+            <View className="px-4 pt-3 pb-2 bg-black">
               <View className="flex-row flex-wrap">
                 {selectedMedia.map((media) => (
                   <View key={media.id} className="relative mr-2 mb-2">
@@ -383,27 +385,28 @@ export default function ChatScreen() {
           )}
 
           {/* Input Row */}
-          <View className="flex-row items-center p-4">
+          <View className="flex-row items-center p-4 bg-black">
             {/* Media picker */}
             <TouchableOpacity onPress={pickMedia} className="mr-3">
               <Feather name="plus" size={22} color="white" />
             </TouchableOpacity>
 
-            <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-2 mr-3">
+            <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-3 mr-3 min-h-[44px]">
               <TextInput
                 value={newMessage}
                 onChangeText={setNewMessage}
                 placeholder="Type a message..."
-                placeholderTextColor="gray"
+                placeholderTextColor="#9CA3AF"
                 className="flex-1 text-white text-base"
                 multiline
                 maxLength={500}
+                style={{ minHeight: 20, maxHeight: 100 }}
               />
             </View>
             <TouchableOpacity
               onPress={sendMessage}
               disabled={(!newMessage.trim() && selectedMedia.length === 0) || sending}
-              className={`w-10 h-10 rounded-full items-center justify-center ${
+              className={`w-11 h-11 rounded-full items-center justify-center ${
                 (newMessage.trim() || selectedMedia.length > 0) && !sending ? 'bg-blue-500' : 'bg-gray-600'
               }`}
             >

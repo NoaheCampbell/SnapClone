@@ -101,15 +101,13 @@ export default function CameraScreen() {
 
       if (photo?.uri) {
         // Save to camera roll
-        const asset = await MediaLibrary.createAssetAsync(photo.uri);
+        await MediaLibrary.saveToLibraryAsync(photo.uri);
         
         Alert.alert(
           'Photo Saved! 📸',
           'Your photo has been saved to the camera roll.',
           [{ text: 'OK' }]
         );
-        
-        console.log('Photo saved:', asset);
       }
     } catch (error) {
       console.error('Error taking photo:', error);
