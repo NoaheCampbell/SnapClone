@@ -23,17 +23,19 @@ export default function IndexScreen() {
     }
   }, [user, profile, loading])
 
-  // Add timeout fallback in case loading gets stuck
+  // Add timeout fallback in case loading gets stuck - but only if no user at all
   useEffect(() => {
     const timeout = setTimeout(() => {
-      if (loading) {
-        console.log('Loading timeout, forcing redirect to login')
+      if (loading && !user) {
+        console.log('Loading timeout with no user, forcing redirect to login')
         router.replace('/(auth)/login')
+      } else if (loading && user) {
+        console.log('Loading timeout but user exists, continuing to wait for profile...')
       }
-    }, 5000) // 5 second timeout
+    }, 10000) // Increased to 10 seconds and only redirect if no user
 
     return () => clearTimeout(timeout)
-  }, [loading])
+  }, [loading, user])
 
   // Show loading screen while checking auth state
   return (

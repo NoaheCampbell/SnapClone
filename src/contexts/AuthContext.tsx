@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { Session, User } from '@supabase/supabase-js'
 import * as Linking from 'expo-linking'
 // import * as AuthSession from 'expo-auth-session'
@@ -37,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const profileLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     // Handle deep links for email confirmation
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        loadProfile(session.user.id)
+        debouncedLoadProfile(session.user.id)
       } else {
         setLoading(false)
       }
@@ -101,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null)
         
         if (session?.user) {
-          await loadProfile(session.user.id)
+          debouncedLoadProfile(session.user.id)
         } else {
           setProfile(null)
           setLoading(false)
@@ -112,14 +114,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe()
       linkingSubscription?.remove()
+      if (profileLoadTimeoutRef.current) {
+        clearTimeout(profileLoadTimeoutRef.current)
+      }
     }
   }, [])
 
-  const loadProfile = async (userId: string) => {
+  // Debounced profile loading to prevent race conditions
+  const debouncedLoadProfile = (userId: string) => {
+    // Clear any existing timeout
+    if (profileLoadTimeoutRef.current) {
+      clearTimeout(profileLoadTimeoutRef.current)
+    }
+    
+    // Set a new timeout to load profile after a short delay
+    profileLoadTimeoutRef.current = setTimeout(() => {
+      loadProfile(userId)
+    }, 100) // 100ms debounce
+  }
+
+  const loadProfile = async (userId: string, retryCount = 0) => {
+    // Prevent duplicate loading attempts
+    if (profileLoading) {
+      console.log('Profile loading already in progress, skipping...')
+      return
+    }
+
+    setProfileLoading(true)
+    // Don't set loading to false until we have a definitive result
+    setLoading(true)
+    
     try {
-      console.log('Loading profile for user:', userId)
+      console.log(`Loading profile for user: ${userId} (attempt ${retryCount + 1})`)
       
-      // Add timeout to profile loading
+      // Add timeout to profile loading - longer timeout for better reliability
       const profilePromise = supabase
         .from('profiles')
         .select('*')
@@ -127,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
         
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Profile loading timeout')), 5000) // 5 second timeout
+        setTimeout(() => reject(new Error('Profile loading timeout')), 8000) // Increased to 8 seconds
       })
       
       const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any
@@ -137,26 +165,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // No profile found - this is expected for new users
           console.log('No profile found for user - will need to create one')
           setProfile(null)
+          setLoading(false) // Only set loading false when we have definitive result
+        } else if (error.message === 'Profile loading timeout' && retryCount < 2) {
+          // Retry up to 2 times for timeouts
+          console.log(`Profile loading timed out, retrying... (${retryCount + 1}/2)`)
+          setProfileLoading(false) // Reset flag before retry
+          // Don't set loading to false - keep trying
+          setTimeout(() => loadProfile(userId, retryCount + 1), 1000)
+          return // Don't set loading to false yet
         } else if (error.message === 'Profile loading timeout') {
-          console.log('Profile loading timed out - database might be unavailable')
+          console.log('Profile loading timed out after retries - treating as no profile')
           setProfile(null)
+          setLoading(false)
         } else {
           console.error('Error loading profile:', error)
           setProfile(null)
+          setLoading(false)
         }
       } else if (data) {
-        console.log('Profile loaded:', data)
+        console.log('Profile loaded successfully:', data)
         setProfile(data)
+        setLoading(false)
       } else {
         console.log('No profile data returned')
         setProfile(null)
+        setLoading(false)
       }
     } catch (error) {
       console.error('Unexpected error loading profile:', error)
       setProfile(null)
-    } finally {
-      // Always stop loading regardless of success/failure
       setLoading(false)
+    } finally {
+      setProfileLoading(false)
     }
   }
 
