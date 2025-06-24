@@ -126,7 +126,7 @@ create table if not exists channel_members (
 );
 alter table channel_members enable row level security;
 create policy "ChannelMembers: member can select" on channel_members
-  for select using ( member_id = auth.uid() );
+  for select using ( auth.uid() in (select channel_id from channel_members where member_id = auth.uid()) );
 create policy "ChannelMembers: users can join channels" on channel_members
   for insert with check ( member_id = auth.uid() );
 
@@ -171,3 +171,84 @@ create table if not exists notifications (
 alter table notifications enable row level security;
 create policy "Notifications: owner" on notifications
   for select using ( auth.uid() = user_id ); 
+-- =================================================================
+-- SECURE DATABASE FUNCTIONS FOR CHAT
+-- =================================================================
+
+-- Function to securely get chat messages
+CREATE OR REPLACE FUNCTION get_chat_messages(p_channel_id uuid)
+RETURNS TABLE (
+    id bigint,
+    content text,
+    sender_id uuid,
+    created_at timestamptz,
+    sender_name text,
+    is_own_message boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    -- Security check: Ensure the current user is a member of the requested channel
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.channel_members cm
+        WHERE cm.channel_id = p_channel_id AND cm.member_id = auth.uid()
+    ) THEN
+        RETURN; -- If not a member, return an empty set
+    END IF;
+
+    -- If user is a member, return the messages for that channel
+    RETURN QUERY
+    SELECT
+        m.id,
+        m.content,
+        m.sender_id,
+        m.created_at,
+        p.username AS sender_name,
+        (m.sender_id = auth.uid()) AS is_own_message
+    FROM public.messages m
+    JOIN public.profiles p ON m.sender_id = p.user_id
+    WHERE m.channel_id = p_channel_id
+    ORDER BY m.created_at ASC;
+END;
+$$;
+
+
+-- Function to securely get the chat title and participants
+CREATE OR REPLACE FUNCTION get_chat_details(p_channel_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    chat_details jsonb;
+BEGIN
+    -- Security check: Ensure the current user is a member
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.channel_members cm
+        WHERE cm.channel_id = p_channel_id AND cm.member_id = auth.uid()
+    ) THEN
+        RETURN jsonb_build_object('error', 'User is not a member of this channel');
+    END IF;
+
+    -- If user is a member, build the chat details object
+    SELECT jsonb_build_object(
+        'is_group', c.is_group,
+        'participants', (
+            SELECT jsonb_agg(jsonb_build_object('user_id', p.user_id, 'username', p.username))
+            FROM public.channel_members cm
+            JOIN public.profiles p ON cm.member_id = p.user_id
+            WHERE cm.channel_id = p_channel_id AND cm.member_id != auth.uid()
+        )
+    )
+    INTO chat_details
+    FROM public.channels c
+    WHERE c.id = p_channel_id;
+
+    RETURN chat_details;
+END;
+$$;

@@ -27,33 +27,39 @@ export default function ChatScreen() {
     if (channelId) {
       loadMessages()
       loadChatInfo()
-      subscribeToMessages()
+      const subscription = supabase
+        .channel(`messages:${channelId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `channel_id=eq.${channelId}`
+          },
+          (payload) => {
+            loadMessages()
+          }
+        )
+        .subscribe()
+
+      return () => {
+        subscription.unsubscribe()
+      }
     }
   }, [channelId])
 
   const loadChatInfo = async () => {
     try {
-      const { data: channel, error } = await supabase
-        .from('channels')
-        .select(`
-          is_group,
-          channel_members (
-            profiles (
-              username
-            )
-          )
-        `)
-        .eq('id', channelId)
-        .single()
+      const { data, error } = await supabase.rpc('get_chat_details', { p_channel_id: channelId })
 
       if (error) throw error
 
-      if (channel) {
-        if (channel.is_group) {
-                     setChatTitle((channel.channel_members as any[]).map((m: any) => m.profiles.username).join(', '))
-                  } else {
-            setChatTitle((channel.channel_members as any[])[0]?.profiles?.username || 'Chat')
-          }
+      const { is_group, participants } = data
+      if (is_group) {
+        setChatTitle(participants?.map((p: any) => p.username).join(', ') || 'Group')
+      } else {
+        setChatTitle(participants?.[0]?.username || 'Chat')
       }
     } catch (error) {
       console.error('Error loading chat info:', error)
@@ -62,35 +68,11 @@ export default function ChatScreen() {
 
   const loadMessages = async () => {
     try {
-      const { data: user } = await supabase.auth.getUser()
-      if (!user.user) return
-
-      const { data: messages, error } = await supabase
-        .from('messages')
-        .select(`
-          id,
-          content,
-          sender_id,
-          created_at,
-          profiles!inner (
-            username
-          )
-        `)
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true })
-
+      const { data, error } = await supabase.rpc('get_chat_messages', { p_channel_id: channelId })
+      
       if (error) throw error
 
-      const transformedMessages: Message[] = messages?.map(msg => ({
-        id: msg.id,
-        content: msg.content,
-        sender_id: msg.sender_id,
-        created_at: msg.created_at,
-                 sender_name: (msg.profiles as any).username,
-        is_own_message: msg.sender_id === user.user.id
-      })) || []
-
-      setMessages(transformedMessages)
+      setMessages(data || [])
     } catch (error) {
       console.error('Error loading messages:', error)
     } finally {
@@ -99,26 +81,7 @@ export default function ChatScreen() {
   }
 
   const subscribeToMessages = () => {
-    const subscription = supabase
-      .channel(`messages:${channelId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `channel_id=eq.${channelId}`
-        },
-        (payload) => {
-          // Reload messages when new message arrives
-          loadMessages()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
+    // This is now handled in the useEffect hook directly
   }
 
   const sendMessage = async () => {

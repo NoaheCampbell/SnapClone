@@ -24,24 +24,34 @@ export default function NewChatScreen() {
 
   const loadFriends = async () => {
     try {
-      const { data: friends, error } = await supabase
+      // Get current user so we only fetch their friends and avoid showing themselves
+      const { data: currentUser } = await supabase.auth.getUser()
+      if (!currentUser.user) return
+
+      const { data, error } = await supabase
         .from('friends')
-        .select(`
+        .select(
+          `
           friend_id,
           profiles!friends_friend_id_fkey (
             user_id,
             username,
             avatar_url
           )
-        `)
+        `
+        )
+        .eq('user_id', currentUser.user.id) // only rows where the logged-in user is the owner
 
       if (error) throw error
 
-      const friendsList: Friend[] = friends?.map((f: any) => ({
-        user_id: f.profiles.user_id,
-        username: f.profiles.username,
-        avatar_url: f.profiles.avatar_url
-      })) || []
+      const friendsList: Friend[] =
+        data?.
+          filter((f: any) => f.friend_id !== currentUser.user.id) // safety: don't include self
+          .map((f: any) => ({
+            user_id: f.profiles.user_id,
+            username: f.profiles.username,
+            avatar_url: f.profiles.avatar_url
+          })) || []
 
       setFriends(friendsList)
     } catch (error) {

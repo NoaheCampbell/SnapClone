@@ -7,8 +7,8 @@ import { supabase } from '../../../lib/supabase'
 
 interface Chat {
   id: string
-  isGroup: boolean
-  lastMessage?: {
+  is_group: boolean
+  last_message?: {
     content: string
     created_at: string
     sender_name: string
@@ -26,48 +26,26 @@ export default function InboxScreen() {
 
   useEffect(() => {
     loadChats()
+    const channel = supabase.channel('inbox-changes')
+      .on('postgres_changes', { event: '*', schema: 'public' }, loadChats)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   const loadChats = async () => {
+    setLoading(true)
     try {
-      // Get user's channels with last messages and participants
-      const { data: channels, error } = await supabase
-        .from('channels')
-        .select(`
-          id,
-          is_group,
-          channel_members!inner (
-            profiles!inner (
-              user_id,
-              username,
-              avatar_url
-            )
-          ),
-          messages (
-            content,
-            created_at,
-            profiles!inner (
-              username
-            )
-          )
-        `)
-        .order('created_at', { ascending: false })
+      const { data, error } = await supabase.rpc('get_user_chats')
 
-      if (error) throw error
-
-      // Transform data for easier use
-      const transformedChats: Chat[] = channels?.map(channel => ({
-        id: channel.id,
-        isGroup: channel.is_group,
-        participants: channel.channel_members.map((member: any) => member.profiles),
-        lastMessage: channel.messages?.[0] ? {
-          content: channel.messages[0].content,
-          created_at: channel.messages[0].created_at,
-          sender_name: (channel.messages[0].profiles as any).username
-        } : undefined
-      })) || []
-
-      setChats(transformedChats)
+      if (error) {
+        console.error('Error loading chats via rpc:', error)
+        throw error
+      }
+      
+      setChats(data as any[] || [])
     } catch (error) {
       console.error('Error loading chats:', error)
     } finally {
@@ -91,15 +69,17 @@ export default function InboxScreen() {
   }
 
   const getChatDisplayName = (chat: Chat) => {
-    if (chat.isGroup) {
+    if (!chat.participants) {
+      return chat.is_group ? 'Group' : 'Chat'
+    }
+    if (chat.is_group) {
       return chat.participants.map(p => p.username).join(', ')
     }
-    // For 1-on-1 chats, show the other person's name
     return chat.participants[0]?.username || 'Unknown'
   }
 
   const getChatAvatar = (chat: Chat) => {
-    if (chat.isGroup) {
+    if (chat.is_group || !chat.participants || chat.participants.length === 0) {
       return null // Could show group icon
     }
     return chat.participants[0]?.avatar_url
@@ -118,7 +98,7 @@ export default function InboxScreen() {
           />
         ) : (
           <Feather 
-            name={item.isGroup ? "users" : "user"} 
+            name={item.is_group ? "users" : "user"} 
             size={20} 
             color="white" 
           />
@@ -127,20 +107,20 @@ export default function InboxScreen() {
       
       <View className="flex-1">
         <View className="flex-row justify-between items-center mb-1">
-          <Text className="text-white font-semibold text-16">
+          <Text className="text-white font-semibold text-base">
             {getChatDisplayName(item)}
           </Text>
-          {item.lastMessage && (
+          {item.last_message && (
             <Text className="text-gray-400 text-sm">
-              {formatTime(item.lastMessage.created_at)}
+              {formatTime(item.last_message.created_at)}
             </Text>
           )}
         </View>
         
-        {item.lastMessage ? (
+        {item.last_message ? (
           <Text className="text-gray-400 text-sm" numberOfLines={1}>
-            {item.isGroup && `${item.lastMessage.sender_name}: `}
-            {item.lastMessage.content}
+            {item.is_group && `${item.last_message.sender_name}: `}
+            {item.last_message.content}
           </Text>
         ) : (
           <Text className="text-gray-500 text-sm italic">
