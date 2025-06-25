@@ -25,11 +25,13 @@ interface SprintCameraProps {
 }
 
 // Draggable text component - moved outside to prevent recreation
-const DraggableText = React.memo(({ textOverlay, updateTextOverlay, startEditingText, selectedTextId }: { 
+const DraggableText = React.memo(({ textOverlay, updateTextOverlay, startEditingText, finishEditingText, selectedTextId, currentEditingTextRef }: { 
   textOverlay: TextOverlay;
   updateTextOverlay: (id: string, updates: Partial<TextOverlay>) => void;
   startEditingText: (id: string) => void;
+  finishEditingText: (id: string, newText: string) => void;
   selectedTextId: string | null;
+  currentEditingTextRef: React.MutableRefObject<{ id: string; text: string } | null>;
 }) => {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -88,7 +90,7 @@ const DraggableText = React.memo(({ textOverlay, updateTextOverlay, startEditing
           },
         ]}
       >
-        <EditableTextInput textOverlay={textOverlay} />
+        <EditableTextInput textOverlay={textOverlay} onFinishEditing={finishEditingText} currentEditingTextRef={currentEditingTextRef} />
       </Animated.View>
     );
   }
@@ -131,31 +133,55 @@ const DraggableText = React.memo(({ textOverlay, updateTextOverlay, startEditing
 });
 
 // Editable text component - also moved outside
-const EditableTextInput = React.memo(({ textOverlay }: { textOverlay: TextOverlay }) => {
+const EditableTextInput = React.memo(({ textOverlay, onFinishEditing, currentEditingTextRef }: { 
+  textOverlay: TextOverlay;
+  onFinishEditing: (id: string, newText: string) => void;
+  currentEditingTextRef: React.MutableRefObject<{ id: string; text: string } | null>;
+}) => {
   const [localText, setLocalText] = useState(textOverlay.text);
+  const textInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     setLocalText(textOverlay.text);
-  }, [textOverlay.text]);
+    // Update the ref with current editing state
+    currentEditingTextRef.current = { id: textOverlay.id, text: textOverlay.text };
+  }, [textOverlay.text, textOverlay.id, currentEditingTextRef]);
 
-  const handleFinish = () => {
-    // This will be handled by the parent component
+  const handleTextChange = (text: string) => {
+    setLocalText(text);
+    // Update the ref with current text
+    currentEditingTextRef.current = { id: textOverlay.id, text };
   };
 
+  const handleFinish = () => {
+    onFinishEditing(textOverlay.id, localText);
+    currentEditingTextRef.current = null;
+  };
+
+  // Force blur when component is about to unmount or editing ends
+  useEffect(() => {
+    return () => {
+      if (textInputRef.current) {
+        textInputRef.current.blur();
+      }
+    };
+  }, []);
+
   return (
-    <View
-      style={{
-        padding: 8,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 8,
-        borderWidth: 2,
-        borderColor: '#007AFF',
-        minWidth: 100,
-      }}
-    >
+            <View
+          style={{
+            padding: 8,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: '#007AFF',
+            minWidth: 100,
+          }}
+        >
       <TextInput
+        ref={textInputRef}
         value={localText}
-        onChangeText={setLocalText}
+        onChangeText={handleTextChange}
         onBlur={handleFinish}
         onSubmitEditing={handleFinish}
         style={{
@@ -193,6 +219,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   const containerRef = useRef<View>(null);
   const captureResultRef = useRef<string | undefined>(undefined);
   const currentEditingTextRef = useRef<{ id: string; text: string } | null>(null);
+  const isEditingRef = useRef(false);
 
   // Text colors
   const textColors = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'];
@@ -228,6 +255,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   const startEditingText = (id: string) => {
     const text = textOverlays.find(t => t.id === id);
     if (text) {
+      isEditingRef.current = true;
       setTextOverlays(currentOverlays =>
         currentOverlays.map(t =>
           t.id === id ? { ...t, isEditing: true } : { ...t, isEditing: false }
@@ -238,6 +266,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   };
 
   const finishEditingText = (id: string, newText: string) => {
+    isEditingRef.current = false;
     updateTextOverlay(id, { 
       text: newText.trim() || 'Text', 
       isEditing: false 
@@ -246,20 +275,26 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   };
 
   const dismissAllEditing = () => {
-    if (currentEditingTextRef.current) {
+    // Find any text that's currently being edited and save it
+    const editingOverlay = textOverlays.find(overlay => overlay.isEditing);
+    if (editingOverlay && currentEditingTextRef.current) {
+      // Save the current text from the ref before dismissing
       const { id, text } = currentEditingTextRef.current;
-      setTextOverlays(textOverlays.map(overlay => 
+      setTextOverlays(prev => prev.map(overlay => 
         overlay.id === id 
           ? { ...overlay, text: text.trim() || 'Text', isEditing: false }
           : { ...overlay, isEditing: false }
       ));
-      currentEditingTextRef.current = null;
     } else {
+      // No editing text, just dismiss
       setTextOverlays(textOverlays.map(text => ({
         ...text,
         isEditing: false
       })));
     }
+    
+    isEditingRef.current = false;
+    currentEditingTextRef.current = null;
     setSelectedTextId(null);
   };
 
@@ -542,7 +577,9 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
                 textOverlay={textOverlay}
                 updateTextOverlay={updateTextOverlay}
                 startEditingText={startEditingText}
+                finishEditingText={finishEditingText}
                 selectedTextId={selectedTextId}
+                currentEditingTextRef={currentEditingTextRef}
               />
             ))}
 
