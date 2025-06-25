@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { router } from 'expo-router';
@@ -11,6 +11,7 @@ interface Sprint {
   circle_id: string;
   user_id: string;
   topic: string;
+  goals?: string;
   tags: string[];
   started_at: string;
   ends_at: string;
@@ -35,6 +36,13 @@ export default function SprintsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [showSprintModal, setShowSprintModal] = useState(false);
+  const [selectedCircleId, setSelectedCircleId] = useState<string>('');
+  const [sprintTopic, setSprintTopic] = useState('');
+  const [sprintGoals, setSprintGoals] = useState('');
+  const [sprintDuration, setSprintDuration] = useState(25);
+  const [customDuration, setCustomDuration] = useState('');
+  const [creatingSprintLoading, setCreatingSprintLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -78,6 +86,7 @@ export default function SprintsTab() {
           circle_id: sprint.circle_id,
           user_id: sprint.user_id,
           topic: sprint.topic,
+          goals: undefined, // Will add back when column exists
           tags: sprint.tags || [],
           started_at: sprint.started_at,
           ends_at: sprint.ends_at,
@@ -95,7 +104,12 @@ export default function SprintsTab() {
       const { data: circles, error: circlesError } = await supabase
         .rpc('get_user_circles');
 
-      if (circlesError) throw circlesError;
+      if (circlesError) {
+        console.error('Error loading circles:', circlesError);
+        throw circlesError;
+      }
+
+      console.log('Loaded circles:', circles);
 
       // Get active sprint counts for each circle
       const circlesWithStats: Circle[] = await Promise.all(
@@ -141,6 +155,16 @@ export default function SprintsTab() {
           style: 'destructive',
           onPress: async () => {
             try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) return;
+
+              // Get sprint details first
+              const { data: sprint } = await supabase
+                .from('sprints')
+                .select('circle_id')
+                .eq('id', sprintId)
+                .single();
+
               // Update sprint to end now
               const { error } = await supabase
                 .from('sprints')
@@ -148,6 +172,26 @@ export default function SprintsTab() {
                 .eq('id', sprintId);
 
               if (error) throw error;
+
+              // Send a system message about ending the sprint early
+              if (sprint?.circle_id) {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('username')
+                  .eq('user_id', user.id)
+                  .single();
+
+                const username = profile?.username || 'Someone';
+                const { error: messageError } = await supabase
+                  .from('messages')
+                  .insert({
+                    circle_id: sprint.circle_id,
+                    sender_id: user.id,
+                    content: `⏹️ ${username} ended their "${topic}" sprint early`
+                  });
+
+                if (messageError) console.error('Error sending sprint end notification:', messageError);
+              }
 
               Alert.alert('Sprint Ended', 'Your sprint has been completed!');
               loadData(); // Refresh the data
@@ -161,50 +205,75 @@ export default function SprintsTab() {
     );
   };
 
-  const startSprint = async (circleId: string) => {
-    Alert.prompt(
-      'Start Sprint',
-      'What are you studying?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Start', 
-          onPress: async (topic) => {
-            if (!topic?.trim()) return;
-            
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) return;
+  const openSprintModal = (circleId: string) => {
+    setSelectedCircleId(circleId);
+    setSprintTopic('');
+    setSprintGoals('');
+    setSprintDuration(25);
+    setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
+    setShowSprintModal(true);
+  };
 
-              // Create sprint directly in database
-              const sprintMinutes = 25;
-              const endsAt = new Date(Date.now() + sprintMinutes * 60 * 1000);
+  const createSprint = async () => {
+    if (!sprintTopic.trim() || creatingSprintLoading) return;
+    
+    // Validate duration
+    const duration = parseInt(customDuration);
+    if (isNaN(duration) || duration < 1 || duration > 180) {
+      Alert.alert('Invalid Duration', 'Please enter a duration between 1 and 180 minutes.');
+      return;
+    }
+    
+    try {
+      setCreatingSprintLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-              const { data: sprint, error: sprintError } = await supabase
-                .from('sprints')
-                .insert({
-                  circle_id: circleId,
-                  user_id: user.id,
-                  topic: topic.trim(),
-                  tags: [],
-                  ends_at: endsAt.toISOString()
-                })
-                .select()
-                .single();
+      // Create sprint directly in database
+      const endsAt = new Date(Date.now() + duration * 60 * 1000);
 
-              if (sprintError) throw sprintError;
+      const { data: sprint, error: sprintError } = await supabase
+        .from('sprints')
+        .insert({
+          circle_id: selectedCircleId,
+          user_id: user.id,
+          topic: sprintTopic.trim(),
+          // goals: sprintGoals.trim() || null, // Will add back when column exists
+          tags: [],
+          ends_at: endsAt.toISOString()
+        })
+        .select()
+        .single();
 
-              Alert.alert('Sprint Started!', `Your ${topic} sprint has begun. Good luck!`);
-              loadData(); // Refresh the data
-            } catch (error) {
-              console.error('Error starting sprint:', error);
-              Alert.alert('Error', 'Failed to start sprint. Please try again.');
-            }
-          }
-        }
-      ],
-      'plain-text'
-    );
+      if (sprintError) throw sprintError;
+
+      // Send a system message to the circle about the sprint start
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', user.id)
+        .single();
+
+      const username = profile?.username || 'Someone';
+      const { error: messageError } = await supabase
+        .from('messages')
+        .insert({
+          circle_id: selectedCircleId,
+          sender_id: user.id,
+          content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`
+        });
+
+      if (messageError) console.error('Error sending sprint notification:', messageError);
+
+      setShowSprintModal(false);
+      Alert.alert('Sprint Started!', `Your ${sprintTopic} sprint has begun. Good luck!`);
+      loadData(); // Refresh the data
+    } catch (error) {
+      console.error('Error starting sprint:', error);
+      Alert.alert('Error', 'Failed to start sprint. Please try again.');
+    } finally {
+      setCreatingSprintLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -254,6 +323,9 @@ export default function SprintsTab() {
           <View className="flex-1">
             <Text className="text-white font-semibold text-lg">{item.topic}</Text>
             <Text className="text-gray-400 text-sm">{item.username} • {item.circle_name}</Text>
+            {item.goals && (
+              <Text className="text-gray-300 text-sm mt-1">Goals: {item.goals}</Text>
+            )}
           </View>
           {isStillActive && (
             <View className={`rounded-full px-3 py-1 ${timeRemaining < 5 * 60 * 1000 ? 'bg-red-500' : 'bg-blue-500'}`}>
@@ -308,7 +380,7 @@ export default function SprintsTab() {
 
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
-      onPress={() => startSprint(item.id)}
+      onPress={() => openSprintModal(item.id)}
       className="bg-gray-800 rounded-lg p-4 mb-3 mx-4"
     >
       <View className="flex-row justify-between items-center">
@@ -399,6 +471,102 @@ export default function SprintsTab() {
           />
         </View>
       </View>
+
+      {/* Sprint Creation Modal */}
+      <Modal
+        visible={showSprintModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <SafeAreaView className="flex-1 bg-black">
+          <View className="flex-1">
+            {/* Header */}
+            <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
+              <TouchableOpacity onPress={() => {
+                setShowSprintModal(false);
+                setSprintTopic('');
+                setSprintGoals('');
+                setCustomDuration('25');
+              }}>
+                <Text className="text-blue-400 text-lg">Cancel</Text>
+              </TouchableOpacity>
+              <Text className="text-white text-lg font-semibold">New Sprint</Text>
+              <TouchableOpacity 
+                onPress={createSprint}
+                disabled={!sprintTopic.trim() || creatingSprintLoading || !customDuration || parseInt(customDuration) < 1 || parseInt(customDuration) > 180}
+              >
+                <Text className={`text-lg font-semibold ${
+                  sprintTopic.trim() && !creatingSprintLoading && customDuration && parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 ? 'text-blue-400' : 'text-gray-600'
+                }`}>
+                  {creatingSprintLoading ? 'Creating...' : 'Start'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Form */}
+            <View className="flex-1 p-4">
+              {/* Topic */}
+              <View className="mb-6">
+                <Text className="text-white text-lg font-semibold mb-2">What are you studying?</Text>
+                <TextInput
+                  value={sprintTopic}
+                  onChangeText={setSprintTopic}
+                  placeholder="e.g., React Native components"
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
+                  autoFocus
+                />
+              </View>
+
+              {/* Goals */}
+              <View className="mb-6">
+                <Text className="text-white text-lg font-semibold mb-2">Goals (optional)</Text>
+                <TextInput
+                  value={sprintGoals}
+                  onChangeText={setSprintGoals}
+                  placeholder="e.g., Complete login screen, Fix navigation bug"
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Duration */}
+              <View className="mb-6">
+                <Text className="text-white text-lg font-semibold mb-2">Duration (minutes)</Text>
+                <TextInput
+                  value={customDuration}
+                  onChangeText={(text) => {
+                    setCustomDuration(text);
+                    const num = parseInt(text);
+                    if (!isNaN(num) && num >= 1 && num <= 180) {
+                      setSprintDuration(num);
+                    }
+                  }}
+                  placeholder="Enter duration (1-180 minutes)"
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
+                  keyboardType="numeric"
+                />
+                {customDuration && (
+                  <Text className={`text-xs mt-1 ${
+                    parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 
+                      ? 'text-gray-400' 
+                      : 'text-red-400'
+                  }`}>
+                    {parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 
+                      ? `Duration: ${parseInt(customDuration)} minutes`
+                      : 'Duration must be between 1-180 minutes'
+                    }
+                  </Text>
+                )}
+              </View>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 } 
