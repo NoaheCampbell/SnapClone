@@ -55,6 +55,9 @@ export default function CameraScreen() {
 
   // Store captured uri from onLoadEnd capture
   const captureResultRef = useRef<string | undefined>(undefined);
+  
+  // Track currently editing text for saving on background tap
+  const currentEditingTextRef = useRef<{ id: string; text: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -122,10 +125,33 @@ export default function CameraScreen() {
   };
 
   const dismissAllEditing = () => {
-    setTextOverlays(textOverlays.map(text => ({
-      ...text,
-      isEditing: false
-    })));
+    // Save any currently editing text before dismissing
+    console.log('dismissAllEditing called, currentEditingTextRef:', currentEditingTextRef.current);
+    if (currentEditingTextRef.current) {
+      const { id, text } = currentEditingTextRef.current;
+      console.log('Saving text:', text, 'for id:', id);
+      setTextOverlays(textOverlays.map(overlay => 
+        overlay.id === id 
+          ? { ...overlay, text: text.trim() || 'Text', isEditing: false }
+          : { ...overlay, isEditing: false }
+      ));
+      currentEditingTextRef.current = null;
+    } else {
+      console.log('No editing text to save');
+      setTextOverlays(textOverlays.map(text => ({
+        ...text,
+        isEditing: false
+      })));
+    }
+    setSelectedTextId(null);
+  };
+
+  // Save and dismiss editing for a specific text
+  const saveAndDismissEditing = (id: string, newText: string) => {
+    updateTextOverlay(id, { 
+      text: newText.trim() || 'Text', 
+      isEditing: false 
+    });
     setSelectedTextId(null);
   };
 
@@ -138,6 +164,12 @@ export default function CameraScreen() {
     setTextOverlays([]);
     setSelectedTextId(null);
   };
+
+  // Tap gesture to deselect text when tapping on camera background
+  const backgroundTapGesture = Gesture.Tap()
+    .onEnd(() => {
+      runOnJS(dismissAllEditing)();
+    });
 
 
 
@@ -275,8 +307,15 @@ export default function CameraScreen() {
   const EditableTextInput = ({ textOverlay }: { textOverlay: TextOverlay }) => {
     const [localText, setLocalText] = useState(textOverlay.text);
 
+    // Update the ref whenever text changes so background tap can save it
+    useEffect(() => {
+      console.log('Updating currentEditingTextRef with:', localText, 'for id:', textOverlay.id);
+      currentEditingTextRef.current = { id: textOverlay.id, text: localText };
+    }, [localText, textOverlay.id]);
+
     const handleFinish = () => {
       finishEditingText(textOverlay.id, localText);
+      currentEditingTextRef.current = null;
     };
 
     return (
@@ -516,9 +555,10 @@ export default function CameraScreen() {
     <>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
-          <View 
-            style={{ flex: 1 }} 
-          >
+          <GestureDetector gesture={backgroundTapGesture}>
+            <View 
+              style={{ flex: 1 }} 
+            >
             {capturedPhoto ? (
               <View style={{ flex: 1 }}>
                 {selectedFilter.component ? (
@@ -590,6 +630,7 @@ export default function CameraScreen() {
             
             {/* Post options are now displayed in a full-screen Modal, overlay removed */}
           </View>
+          </GestureDetector>
           
           <SafeAreaView style={{ 
             position: 'absolute', 
