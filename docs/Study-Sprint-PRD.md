@@ -1,4 +1,4 @@
-SprintArc – Product Requirements Document (PRD)
+SprintLoop – Product Requirements Document (PRD)
 
 Last updated: 2025-06-24
 

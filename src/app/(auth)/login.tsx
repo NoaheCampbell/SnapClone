@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Image } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -21,20 +21,7 @@ export default function LoginScreen() {
     }
   }, [user])
 
-  const testConnection = async () => {
-    try {
-      const { data, error } = await supabase.from('profiles').select('count').limit(1)
-      if (error) {
-        console.error('Connection test failed:', error)
-        Alert.alert('Connection Test', `Failed: ${error.message}`)
-      } else {
-        Alert.alert('Connection Test', 'Success! Database is reachable.')
-      }
-    } catch (error) {
-      console.error('Connection test error:', error)
-      Alert.alert('Connection Test', 'Failed: Network error')
-    }
-  }
+
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -72,10 +59,12 @@ export default function LoginScreen() {
         <View className="flex-1 px-6 justify-center">
           {/* Header */}
           <View className="items-center mb-12">
-            <View className="w-20 h-20 bg-yellow-400 rounded-full items-center justify-center mb-6">
-              <Feather name="camera" size={32} color="black" />
-            </View>
-            <Text className="text-white text-3xl font-bold">SnapClone</Text>
+            <Image 
+              source={require('../../../assets/images/sprintloop.png')}
+              className="w-24 h-24 mb-6"
+              resizeMode="contain"
+            />
+            <Text className="text-white text-3xl font-bold">SprintLoop</Text>
             <Text className="text-gray-400 text-base mt-2">Sign in to continue</Text>
           </View>
 
@@ -140,34 +129,7 @@ export default function LoginScreen() {
 
           </View>
 
-          {/* Debug Buttons */}
-          <View className="items-center mt-6 space-y-3">
-            <Text className="text-gray-400 text-sm mb-2">
-              Having trouble signing in?
-            </Text>
-            
-            <TouchableOpacity 
-              onPress={testConnection}
-              className="bg-blue-600 px-4 py-2 rounded-lg mb-2"
-            >
-              <Text className="text-white text-sm font-medium">
-                Test Database Connection
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              onPress={async () => {
-                console.log('Manually clearing session...')
-                await signOut()
-                Alert.alert('Session Cleared', 'All data cleared. Please try signing in again.')
-              }}
-              className="bg-red-600 px-4 py-2 rounded-lg"
-            >
-              <Text className="text-white text-sm font-medium">
-                Clear Session & Data
-              </Text>
-            </TouchableOpacity>
-          </View>
+
 
           {/* Footer */}
           <View className="items-center mt-8">
