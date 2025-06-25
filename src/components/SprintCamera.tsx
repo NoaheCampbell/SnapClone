@@ -339,9 +339,11 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
             borderColor: '#007AFF',
           }}
         >
-          <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold', textAlign: 'center' }}>
-            {filter.name}
-          </Text>
+          <Feather 
+            name={filter.icon as any} 
+            size={20} 
+            color="white" 
+          />
         </View>
         <Text style={{ color: 'white', fontSize: 10, textAlign: 'center' }}>
           {filter.name}
@@ -711,7 +713,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
                 )}
 
                 {/* Bottom Controls */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 60 }}>
                   {/* Text Button */}
                   <TouchableOpacity
                     onPress={addTextOverlay}
@@ -773,7 +775,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
                 {showFilters && (
                   <View style={{ 
                     position: 'absolute', 
-                    bottom: 120, 
+                    bottom: 160, 
                     left: 0, 
                     right: 0, 
                     backgroundColor: 'rgba(0,0,0,0.7)', 
