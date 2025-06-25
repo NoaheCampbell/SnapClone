@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
@@ -447,12 +447,19 @@ export default function SprintsTab() {
 
       if (messageError) console.error('Error sending sprint notification:', messageError);
 
+      // Generate quiz questions in the background
+      generateQuizForSprint(sprint.id, sprintTopic, sprintGoals, quizQuestionCount);
+
       setShowSprintModal(false);
       setStartPhotoUrl('');
+      const currentTopic = sprintTopic; // Store before clearing
       setSprintTopic(''); // Clear form
       setSprintGoals(''); // Clear form
       setCustomDuration('25'); // Reset to default
-      Alert.alert('Sprint Started!', `Your ${sprintTopic} sprint has begun. Good luck!`);
+      Alert.alert(
+        'Sprint Started!', 
+        `Your ${currentTopic} sprint has begun. Quiz questions are being generated in the background - they'll be ready when your sprint ends. Good luck!`
+      );
       loadData(); // Refresh the data
     } catch (error) {
       console.error('Error starting sprint:', error);
@@ -470,6 +477,151 @@ export default function SprintsTab() {
     setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
     setQuizQuestionCount(3); // Default to 3 questions
     setShowSprintModal(true);
+  };
+
+  const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
+    try {
+      console.log(`Generating ${questionCount} quiz questions for sprint: ${topic}`);
+      
+      // Check if summary already exists for this sprint
+      let summary;
+      const { data: existingSummary } = await supabase
+        .from('summaries')
+        .select('id')
+        .eq('sprint_id', sprintId)
+        .single();
+
+      if (existingSummary) {
+        summary = existingSummary;
+        console.log(`Summary already exists for sprint ${sprintId}`);
+      } else {
+        // Create a summary for this sprint
+        const { data: newSummary, error: summaryError } = await supabase
+          .from('summaries')
+          .insert({
+            sprint_id: sprintId,
+            bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
+            concept_map_url: null
+          })
+          .select()
+          .single();
+
+        if (summaryError) {
+          console.error('Error creating summary:', summaryError);
+          return;
+        }
+        summary = newSummary;
+      }
+
+      // Check if quiz already exists for this summary
+      const { data: existingQuiz } = await supabase
+        .from('quizzes')
+        .select('id')
+        .eq('summary_id', summary.id)
+        .single();
+
+      if (existingQuiz) {
+        console.log(`Quiz already exists for sprint ${sprintId}`);
+        return;
+      }
+
+      // Generate quiz questions using ChatGPT with retries
+      const quizContent = await generateQuizWithChatGPT(topic, goals, questionCount);
+      
+      if (quizContent) {
+        // Store the quiz in the database
+        const { error: quizError } = await supabase
+          .from('quizzes')
+          .insert({
+            summary_id: summary.id,
+            mcq_json: quizContent
+          });
+
+        if (quizError) {
+          console.error('Error storing quiz:', quizError);
+        } else {
+          console.log(`Quiz with ${questionCount} questions generated successfully for sprint ${sprintId}`);
+        }
+      } else {
+        console.error(`Failed to generate quiz for sprint ${sprintId} after multiple attempts`);
+        // The quiz will fall back to sample questions when the user tries to take it
+      }
+    } catch (error) {
+      console.error('Error generating quiz for sprint:', error);
+    }
+  };
+
+  const generateQuizWithChatGPT = async (topic: string, goals: string, questionCount: number, maxRetries = 3) => {
+    const prompt = `Generate a quiz with exactly ${questionCount} multiple choice questions based on this study sprint:
+
+Topic: ${topic}
+Goals: ${goals}
+
+The questions should test understanding of the topic and achievement of the stated goals. Each question should have 4 options with one correct answer.
+
+Return the response in this exact JSON format:
+{
+  "questions": [
+    {
+      "question": "Question text here?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": 0
+    }
+  ]
+}`;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Attempting to generate quiz (attempt ${attempt}/${maxRetries})`);
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a helpful assistant that generates educational quiz questions. Always respond with valid JSON only.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            max_tokens: 1500,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`OpenAI API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const quizContent = JSON.parse(data.choices[0].message.content);
+        
+        console.log(`Quiz generation successful on attempt ${attempt}`);
+        return quizContent;
+      } catch (error) {
+        console.error(`Quiz generation attempt ${attempt} failed:`, error);
+        
+        if (attempt === maxRetries) {
+          console.error('All quiz generation attempts failed');
+          return null;
+        }
+        
+        // Exponential backoff: wait 1s, 2s, 4s between retries
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        console.log(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    return null;
   };
 
   const createSprint = async () => {
@@ -706,6 +858,7 @@ export default function SprintsTab() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
       <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']}>
         <View className="flex-1" style={{ paddingBottom: 80 }}>
         {/* Header */}

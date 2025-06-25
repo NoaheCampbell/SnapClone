@@ -6,10 +6,12 @@ import {
   Modal, 
   ScrollView, 
   Alert,
-  ActivityIndicator 
+  ActivityIndicator,
+  StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { supabase } from '../../lib/supabase';
 
 interface QuizQuestion {
@@ -114,7 +116,8 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, spr
         setQuiz(quiz);
         setUserAnswers(new Array(quiz.mcq_json.questions.length).fill(-1));
       } else {
-        // Generate a sample quiz for now (in real app, this would call AI service)
+        // Quiz might still be generating - show a message
+        console.log('Quiz not found for sprint, might still be generating...');
         await generateSampleQuiz();
       }
     } catch (error) {
@@ -126,10 +129,8 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, spr
     }
   };
 
-  const generateQuizWithChatGPT = async () => {
-    try {
-      // Call ChatGPT API to generate quiz questions
-      const prompt = `Generate a quiz with exactly ${questionCount} multiple choice questions based on this study sprint:
+  const generateQuizWithChatGPT = async (maxRetries = 3) => {
+    const prompt = `Generate a quiz with exactly ${questionCount} multiple choice questions based on this study sprint:
 
 Topic: ${sprintTopic}
 Goals: ${sprintGoals}
@@ -147,41 +148,58 @@ Return the response in this exact JSON format:
   ]
 }`;
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful assistant that generates educational quiz questions. Always respond with valid JSON only.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 1000,
-          temperature: 0.7
-        })
-      });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`QuizModal: Attempting to generate quiz (attempt ${attempt}/${maxRetries})`);
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a helpful assistant that generates educational quiz questions. Always respond with valid JSON only.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            max_tokens: 1000,
+            temperature: 0.7
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`OpenAI API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const quizContent = JSON.parse(data.choices[0].message.content);
+        
+        console.log(`QuizModal: Quiz generation successful on attempt ${attempt}`);
+        return quizContent;
+      } catch (error) {
+        console.error(`QuizModal: Quiz generation attempt ${attempt} failed:`, error);
+        
+        if (attempt === maxRetries) {
+          console.error('QuizModal: All quiz generation attempts failed');
+          return null;
+        }
+        
+        // Exponential backoff: wait 1s, 2s, 4s between retries
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        console.log(`QuizModal: Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-
-      const data = await response.json();
-      const quizContent = JSON.parse(data.choices[0].message.content);
-      
-      return quizContent;
-    } catch (error) {
-      console.error('Error generating quiz with ChatGPT:', error);
-      return null;
     }
+    
+    return null;
   };
 
   const generateSampleQuiz = async () => {
@@ -211,11 +229,26 @@ Return the response in this exact JSON format:
         summaryId = newSummary.id;
       }
 
+      // Check if quiz already exists for this summary
+      const { data: existingQuiz } = await supabase
+        .from('quizzes')
+        .select('id, mcq_json')
+        .eq('summary_id', summaryId)
+        .single();
+
+      if (existingQuiz) {
+        console.log('Quiz already exists for this summary');
+        setQuiz(existingQuiz);
+        setUserAnswers(new Array(existingQuiz.mcq_json.questions.length).fill(-1));
+        return;
+      }
+
       // Try to generate quiz with ChatGPT first
       let quizData = await generateQuizWithChatGPT();
       
       // Fall back to sample quiz if ChatGPT fails
       if (!quizData) {
+        console.log('QuizModal: Falling back to sample quiz due to generation failure');
         quizData = {
           questions: [
             {
@@ -245,6 +278,16 @@ Return the response in this exact JSON format:
                 "Better study techniques",
                 "Time management skills",
                 "The importance of focused study time"
+              ],
+              correct_answer: 0
+            },
+            {
+              question: "Note: We were unable to generate custom quiz questions for your topic, so here are some general study reflection questions instead.",
+              options: [
+                "I understand - these questions are still helpful",
+                "That's okay, I'll take the quiz anyway",
+                "No problem, thanks for the fallback questions",
+                "I appreciate having something to reflect on"
               ],
               correct_answer: 0
             }
@@ -400,7 +443,9 @@ Return the response in this exact JSON format:
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']} style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <View className="flex-1 bg-black" style={{ paddingTop: Constants.statusBarHeight }}>
+        <SafeAreaView className="flex-1" edges={['left', 'right', 'bottom']}>
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800" style={{ paddingTop: 16 }}>
           <Text className="text-white text-xl font-bold">Sprint Quiz</Text>
@@ -541,7 +586,8 @@ Return the response in this exact JSON format:
             <Text className="text-white">No quiz available</Text>
           </View>
         )}
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 } 
