@@ -209,6 +209,10 @@ export default function CameraScreen() {
     try {
       setIsCapturing(true);
       
+      // Capture text overlays length before modifying state
+      const hasTextOverlays = textOverlays.length > 0;
+      console.log('Debug: textOverlays.length =', textOverlays.length, 'hasTextOverlays =', hasTextOverlays);
+      
       // Deselect any selected text to avoid UI conflicts during capture
       setSelectedTextId(null);
       
@@ -226,7 +230,7 @@ export default function CameraScreen() {
       // with overlay/text and then snapshot the combined view. To avoid the race condition where the
       // snapshot occurs before the <Image> finishes decoding (resulting in a solid coloured frame),
       // we defer captureRef until the Image's onLoadEnd fires.
-      if (selectedFilter.id !== 'none' || textOverlays.length > 0) {
+      if (selectedFilter.id !== 'none' || hasTextOverlays) {
         setCapturedPhoto(photo.uri);
         setPhotoLoaded(false);
         setControlsVisible(false);
@@ -265,7 +269,7 @@ export default function CameraScreen() {
     } finally {
       setIsCapturing(false);
     }
-  }, [selectedFilter, isCapturing, hasMediaLibraryPermission, photoLoaded, containerRef]);
+  }, [selectedFilter, isCapturing, hasMediaLibraryPermission, photoLoaded, containerRef, textOverlays]);
 
   // Editable text component
   const EditableTextInput = ({ textOverlay }: { textOverlay: TextOverlay }) => {
