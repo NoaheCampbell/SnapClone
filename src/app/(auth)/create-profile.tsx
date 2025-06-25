@@ -1,5 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native'
-import React, { useState } from 'react'
+import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
+import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router } from 'expo-router'
@@ -10,9 +10,14 @@ export default function CreateProfileScreen() {
   const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
   
-  const { createProfile } = useAuth()
+  const { createProfile, user, session, loading: authLoading } = useAuth()
 
   const handleCreateProfile = async () => {
+    if (!user) {
+      Alert.alert('Error', 'Authentication not complete. Please wait and try again.');
+      return;
+    }
+
     if (!username.trim()) {
       Alert.alert('Error', 'Username is required')
       return
@@ -59,6 +64,15 @@ export default function CreateProfileScreen() {
       setLoading(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <SafeAreaView className="flex-1 bg-black justify-center items-center">
+        <ActivityIndicator size="large" color="#ffffff" />
+        <Text className="text-white mt-4">Loading...</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-black">
@@ -125,9 +139,9 @@ export default function CreateProfileScreen() {
             {/* Create Profile Button */}
             <TouchableOpacity
               onPress={handleCreateProfile}
-              disabled={loading || !username.trim()}
+              disabled={loading || !username.trim() || !user}
               className={`rounded-xl py-4 items-center mt-8 ${
-                loading || !username.trim() ? 'bg-gray-600' : 'bg-blue-500'
+                loading || !username.trim() || !user ? 'bg-gray-600' : 'bg-blue-500'
               }`}
             >
               <Text className="text-white text-base font-semibold">

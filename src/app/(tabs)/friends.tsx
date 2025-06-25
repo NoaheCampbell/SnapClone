@@ -13,9 +13,7 @@ interface Profile {
   created_at: string
   is_private?: boolean
   allow_friend_requests?: boolean
-  show_last_active?: boolean
   show_stories_to_friends_only?: boolean
-  last_active?: string
 }
 
 interface Friend {
@@ -37,11 +35,11 @@ interface FriendRequest {
 export default function FriendsScreen() {
   const { user } = useAuth()
   const [friends, setFriends] = useState<Friend[]>([])
-  const [loading, setLoading] = useState(false)
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
+  const [loading, setLoading] = useState(true)
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Profile[]>([])
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
 
   useEffect(() => {
@@ -50,24 +48,6 @@ export default function FriendsScreen() {
       loadFriendRequests()
     }
   }, [user])
-
-  const formatLastActive = (lastActive?: string) => {
-    if (!lastActive) return null
-    
-    const now = new Date()
-    const lastActiveDate = new Date(lastActive)
-    const diffMs = now.getTime() - lastActiveDate.getTime()
-    const diffMinutes = Math.floor(diffMs / (1000 * 60))
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    
-    if (diffMinutes < 5) return 'Active now'
-    if (diffMinutes < 60) return `Active ${diffMinutes}m ago`
-    if (diffHours < 24) return `Active ${diffHours}h ago`
-    if (diffDays === 1) return 'Active yesterday'
-    if (diffDays < 7) return `Active ${diffDays}d ago`
-    return null // Don't show if more than a week
-  }
 
   const loadFriends = async () => {
     if (!user) return
@@ -78,7 +58,7 @@ export default function FriendsScreen() {
         .from('friends')
         .select(`
           *,
-          friend_profile:profiles!friends_friend_id_fkey(*, last_active, show_last_active)
+          friend_profile:profiles!friends_friend_id_fkey(*)
         `)
         .eq('user_id', user.id)
 
@@ -321,11 +301,6 @@ export default function FriendsScreen() {
           {item.friend_profile.display_name || item.friend_profile.username}
         </Text>
         <Text className="text-gray-400 text-sm">@{item.friend_profile.username}</Text>
-        {item.friend_profile.show_last_active && (
-          <Text className="text-gray-500 text-xs mt-1">
-            {formatLastActive(item.friend_profile.last_active)}
-          </Text>
-        )}
       </View>
       
       <TouchableOpacity

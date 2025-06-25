@@ -104,19 +104,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (session?.user) {
           debouncedLoadProfile(session.user.id)
-          // Update last active when user signs in
-          if (event === 'SIGNED_IN') {
-            setTimeout(async () => {
-              try {
-                await supabase
-                  .from('profiles')
-                  .update({ last_active: new Date().toISOString() })
-                  .eq('user_id', session.user.id)
-              } catch (error) {
-                console.error('Error updating last active on sign in:', error)
-              }
-            }, 1000) // Wait a bit for profile to load
-          }
         } else {
           setProfile(null)
           setLoading(false)
@@ -211,7 +198,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email,
       password
       // Removed options to use default settings - email confirmation should be disabled in Supabase dashboard
-    })
+    });
+
+    if (!error && data.user) {
+      setSession(data.session);
+      setUser(data.user);
+    }
     
     // If signup successful and user is immediately confirmed (no email verification required)
     if (!error && data.user && !data.user.email_confirmed_at) {
@@ -223,34 +215,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
-      // Add timeout to prevent hanging
-      const signInPromise = supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
-      })
+      });
+
+      if (!error && data.user) {
+        setSession(data.session);
+        setUser(data.user);
+        await loadProfile(data.user.id);
+      }
       
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Sign in timeout')), 8000) // 8 second timeout
-      })
-      
-      const result = await Promise.race([signInPromise, timeoutPromise])
-      const { data, error } = result as any
-      
-      return { error }
+      return { error };
     } catch (error) {
-      console.error('Sign in failed:', error)
-      return { error }
+      console.error('Sign in failed:', error);
+      return { error };
     }
-  }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut()
   }
 
   const signInWithGoogle = async () => {
-    // TODO: Implement Google Sign In after installing packages
-    return { error: new Error('Google Sign In not implemented yet') }
-  }
+    // Implement Google Sign-In logic
+    return { error: new Error('Not implemented') };
+  };
 
   const createProfile = async (username: string, displayName?: string) => {
     if (!user) {
@@ -258,45 +248,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('createProfile:', err);
       return { error: err };
     }
-
-    console.log(`createProfile: Attempting to create profile for user: ${user.id}`);
-    console.log(`createProfile: Username: ${username}, Display Name: ${displayName}`);
-
+    
     try {
+      // Check if username is already taken
+      const { data: existingProfile, error: existingProfileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', username.toLowerCase())
+        .single()
+
+      if (existingProfile) {
+        console.error('Username is already taken');
+        return { error: new Error('Username is already taken') };
+      }
+
       const { data, error } = await supabase
         .from('profiles')
         .insert({
           user_id: user.id,
           username: username.toLowerCase(),
-          display_name: displayName || username,
+          display_name: displayName
         })
         .select()
         .single();
 
       if (error) {
-        console.error('createProfile: Supabase error:', error);
+        console.error('Error creating profile in DB:', error);
         return { error };
       }
       
-      if (data) {
-        console.log('createProfile: Profile created successfully:', data);
-        setProfile(data);
-        return { error: null };
-      }
-      
-      const unknownError = new Error('Failed to create profile: No data returned from Supabase.');
-      console.error('createProfile:', unknownError);
-      return { error: unknownError };
+      console.log('Profile created successfully in DB:', data);
+      setProfile(data);
+      return { error: null };
 
-    } catch (e: any) {
-      const err = e instanceof Error ? e : new Error('An unexpected error occurred during profile creation.');
-      console.error('createProfile: Caught exception:', err);
-      return { error: err };
+    } catch (err: any) {
+      const e = err instanceof Error ? err : new Error('An unexpected error occurred during profile creation.');
+      console.error('Caught exception in createProfile:', e);
+      return { error: e };
     }
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
-    if (!user) return { error: 'No user found' }
+    if (!user) return { error: new Error('User not logged in') };
 
     const { data, error } = await supabase
       .from('profiles')
@@ -331,22 +324,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const updateLastActive = async () => {
-    if (user?.id) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({
-          last_active: new Date().toISOString()
-        })
-        .eq('user_id', user.id)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Error updating last active:', error)
-      } else if (data) {
-        setProfile(data)
-      }
-    }
+    // Temporarily disabled to prevent database errors
+    return;
   }
 
   const value = {

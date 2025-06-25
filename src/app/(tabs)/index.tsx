@@ -103,7 +103,12 @@ export default function CameraScreen() {
   const startEditingText = (id: string) => {
     const text = textOverlays.find(t => t.id === id);
     if (text) {
-      updateTextOverlay(id, { isEditing: true });
+      // De-select any other text
+      setTextOverlays(currentOverlays =>
+        currentOverlays.map(t =>
+          t.id === id ? { ...t, isEditing: true } : { ...t, isEditing: false }
+        )
+      );
       setSelectedTextId(id);
     }
   };
@@ -529,10 +534,8 @@ export default function CameraScreen() {
     <>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
-          <TouchableOpacity 
+          <View 
             style={{ flex: 1 }} 
-            activeOpacity={1}
-            onPress={dismissAllEditing}
           >
             {capturedPhoto ? (
               <View style={{ flex: 1 }}>
@@ -616,7 +619,7 @@ export default function CameraScreen() {
             )}
             
             {/* Post options are now displayed in a full-screen Modal, overlay removed */}
-          </TouchableOpacity>
+          </View>
           
           <SafeAreaView style={{ 
             position: 'absolute', 
