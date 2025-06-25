@@ -1,11 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image } from 'react-native';
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated } from 'react-native';
+import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
+import QuizModal from '../../components/QuizModal';
+import SprintCompletionModal from '../../components/SprintCompletionModal';
 
 interface Sprint {
   id: string;
@@ -33,11 +36,10 @@ interface Circle {
 
 export default function SprintsTab() {
   const { user } = useAuth();
-  const [activeSprints, setActiveSprints] = useState<Sprint[]>([]);
+  const [recentSprints, setRecentSprints] = useState<Sprint[]>([]);
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [currentTime, setCurrentTime] = useState(Date.now());
   const [showSprintModal, setShowSprintModal] = useState(false);
   const [selectedCircleId, setSelectedCircleId] = useState<string>('');
   const [sprintTopic, setSprintTopic] = useState('');
@@ -49,12 +51,21 @@ export default function SprintsTab() {
   const [showEndCamera, setShowEndCamera] = useState(false);
   const [startPhotoUrl, setStartPhotoUrl] = useState<string>('');
   const [endingSprintId, setEndingSprintId] = useState<string>('');
+  const [showQuizModal, setShowQuizModal] = useState(false);
+  const [quizSprintId, setQuizSprintId] = useState<string>('');
+  const [quizSprintTopic, setQuizSprintTopic] = useState<string>('');
+  const [quizCircleId, setQuizCircleId] = useState<string>('');
+  const [quizSprintDuration, setQuizSprintDuration] = useState<number>(25);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [completionSprintTopic, setCompletionSprintTopic] = useState<string>('');
+  const [completionSprintDuration, setCompletionSprintDuration] = useState<number>(25);
 
   const loadData = useCallback(async () => {
     if (!user) return;
     
     try {
-      // Load active sprints from user's circles
+      // Load recent sprints from user's circles (active + completed in last 24 hours)
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: sprints, error: sprintsError } = await supabase
         .from('sprints')
         .select(`
@@ -70,7 +81,7 @@ export default function SprintsTab() {
           circles!inner(name),
           profiles!inner(username)
         `)
-        .gt('ends_at', new Date().toISOString())
+        .or(`ends_at.gt.${new Date().toISOString()},and(ends_at.lt.${new Date().toISOString()},started_at.gt.${oneDayAgo})`)
         .in('circle_id', 
           await supabase
             .from('circle_members')
@@ -106,7 +117,7 @@ export default function SprintsTab() {
         };
       });
 
-      setActiveSprints(processedSprints);
+      setRecentSprints(processedSprints);
 
       // Load user's circles with stats
       const { data: circles, error: circlesError } = await supabase
@@ -152,6 +163,64 @@ export default function SprintsTab() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  // Separate timer component to prevent parent re-renders
+  const SprintTimer = memo(({ endsAt }: { endsAt: string }) => {
+    const [timeRemaining, setTimeRemaining] = useState(0);
+    
+    useEffect(() => {
+      const updateTimer = () => {
+        const remaining = Math.max(0, new Date(endsAt).getTime() - Date.now());
+        setTimeRemaining(remaining);
+      };
+      
+      updateTimer(); // Initial update
+      const interval = setInterval(updateTimer, 1000);
+      return () => clearInterval(interval);
+    }, [endsAt]);
+    
+    const isStillActive = timeRemaining > 0;
+    
+    if (!isStillActive) return null;
+    
+    return (
+      <View className={`rounded-full px-3 py-1 ${timeRemaining < 5 * 60 * 1000 ? 'bg-red-500' : 'bg-blue-500'}`}>
+        <Text className="text-white font-mono text-sm">
+          {formatTimeRemaining(timeRemaining)}
+        </Text>
+      </View>
+    );
+  });
+
+  const deleteSprint = async (sprintId: string, sprintTopic: string) => {
+    Alert.alert(
+      'Delete Sprint',
+      `Are you sure you want to delete the "${sprintTopic}" sprint? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('sprints')
+                .delete()
+                .eq('id', sprintId);
+
+              if (error) throw error;
+
+              // Refresh the data to remove the deleted sprint from the list
+              loadData();
+            } catch (error) {
+              console.error('Error deleting sprint:', error);
+              Alert.alert('Error', 'Failed to delete sprint. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const endSprint = async (sprintId: string, topic: string) => {
     Alert.alert(
       'End Sprint',
@@ -183,7 +252,7 @@ export default function SprintsTab() {
       // Get sprint details first
       const { data: sprint } = await supabase
         .from('sprints')
-        .select('circle_id')
+        .select('circle_id, started_at, ends_at')
         .eq('id', sprintId)
         .single();
 
@@ -215,7 +284,20 @@ export default function SprintsTab() {
         if (messageError) console.error('Error sending sprint end notification:', messageError);
       }
 
-      Alert.alert('Sprint Ended', 'Your sprint has been completed!');
+      // Show completion modal after sprint ends
+      if (sprint) {
+        // Calculate sprint duration
+        const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
+        
+        setCompletionSprintTopic(topic);
+        setCompletionSprintDuration(duration);
+        setQuizSprintId(sprintId);
+        setQuizSprintTopic(topic);
+        setQuizCircleId(sprint.circle_id);
+        setQuizSprintDuration(duration);
+        setShowCompletionModal(true);
+      }
+      
       loadData(); // Refresh the data
     } catch (error) {
       console.error('Error ending sprint:', error);
@@ -226,6 +308,8 @@ export default function SprintsTab() {
   const completeSprintWithPhoto = async (photoUrl: string) => {
     if (!endingSprintId) return;
     
+    setShowEndCamera(false); // Close camera immediately
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -233,7 +317,7 @@ export default function SprintsTab() {
       // Get sprint details first
       const { data: sprint } = await supabase
         .from('sprints')
-        .select('circle_id, topic')
+        .select('circle_id, topic, started_at, ends_at')
         .eq('id', endingSprintId)
         .single();
 
@@ -269,7 +353,21 @@ export default function SprintsTab() {
       }
 
       setEndingSprintId('');
-      Alert.alert('Sprint Completed!', 'Your sprint has been completed with a photo!');
+      
+      // Show completion modal after sprint ends
+      if (sprint) {
+        // Calculate sprint duration
+        const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
+        
+        setCompletionSprintTopic(sprint.topic || 'Study Sprint');
+        setCompletionSprintDuration(duration);
+        setQuizSprintId(endingSprintId);
+        setQuizSprintTopic(sprint.topic || 'Study Sprint');
+        setQuizCircleId(sprint.circle_id);
+        setQuizSprintDuration(duration);
+        setShowCompletionModal(true);
+      }
+      
       loadData(); // Refresh the data
     } catch (error) {
       console.error('Error completing sprint:', error);
@@ -279,6 +377,7 @@ export default function SprintsTab() {
 
   const handleStartPhoto = (photoUrl: string) => {
     setStartPhotoUrl(photoUrl);
+    setShowStartCamera(false); // Close camera immediately
     // Continue with sprint creation
     createSprintWithPhoto(photoUrl);
   };
@@ -336,6 +435,9 @@ export default function SprintsTab() {
 
       setShowSprintModal(false);
       setStartPhotoUrl('');
+      setSprintTopic(''); // Clear form
+      setSprintGoals(''); // Clear form
+      setCustomDuration('25'); // Reset to default
       Alert.alert('Sprint Started!', `Your ${sprintTopic} sprint has begun. Good luck!`);
       loadData(); // Refresh the data
     } catch (error) {
@@ -394,24 +496,41 @@ export default function SprintsTab() {
     };
   }, [loadData]);
 
-  // Update current time every second for real-time countdown
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 1000);
 
-    return () => clearInterval(interval);
-  }, []);
 
-  const renderSprint = ({ item }: { item: Sprint }) => {
+  const SwipeableSprintItem = memo(({ item }: { item: Sprint }) => {
     const isMySprintAndActive = item.user_id === user?.id && item.is_active;
     
-    // Calculate real-time remaining time
+    // Calculate if sprint is still active (static check, timer component handles real-time updates)
     const endsAt = new Date(item.ends_at).getTime();
-    const timeRemaining = Math.max(0, endsAt - currentTime);
-    const isStillActive = timeRemaining > 0;
+    const isStillActive = endsAt > Date.now();
+    const canDelete = !isStillActive; // Only allow deleting completed sprints
     
-    return (
+    const translateX = new Animated.Value(0);
+    
+    const onGestureEvent = Animated.event(
+      [{ nativeEvent: { translationX: translateX } }],
+      { useNativeDriver: true }
+    );
+    
+    const onHandlerStateChange = (event: any) => {
+      if (event.nativeEvent.state === 5) { // END state
+        const { translationX } = event.nativeEvent;
+        
+        if (canDelete && translationX < -100) {
+          // Swipe left far enough to delete
+          deleteSprint(item.id, item.topic);
+        }
+        
+        // Reset position
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
+    };
+    
+    const SprintContent = () => (
       <View className="bg-gray-900 rounded-lg p-4 mb-3 mx-4">
         <View className="flex-row justify-between items-start mb-2">
           <View className="flex-1">
@@ -450,15 +569,14 @@ export default function SprintsTab() {
             )}
           </View>
           {isStillActive && (
-            <View className={`rounded-full px-3 py-1 ${timeRemaining < 5 * 60 * 1000 ? 'bg-red-500' : 'bg-blue-500'}`}>
-              <Text className="text-white font-mono text-sm">
-                {formatTimeRemaining(timeRemaining)}
-              </Text>
-            </View>
+            <SprintTimer endsAt={item.ends_at} />
           )}
           {!isStillActive && item.is_active && (
-            <View className="bg-gray-600 rounded-full px-3 py-1">
+            <View className="bg-gray-600 rounded-full px-3 py-1 flex-row items-center">
               <Text className="text-white text-sm">Completed</Text>
+              {canDelete && (
+                <Feather name="chevron-left" size={14} color="white" style={{ marginLeft: 4 }} />
+              )}
             </View>
           )}
         </View>
@@ -496,9 +614,39 @@ export default function SprintsTab() {
             </TouchableOpacity>
           </View>
         </View>
+        
+
       </View>
     );
-  };
+    
+    if (!canDelete) {
+      // For active sprints, just return the content without swipe functionality
+      return <SprintContent />;
+    }
+    
+    return (
+      <View style={{ position: 'relative' }}>
+        {/* Delete background */}
+        <View className="absolute right-0 top-0 bottom-0 w-20 bg-red-500 rounded-r-lg mb-3 mr-4 flex justify-center items-center">
+          <Feather name="trash-2" size={20} color="white" />
+        </View>
+        
+        {/* Swipeable content */}
+        <PanGestureHandler
+          onGestureEvent={onGestureEvent}
+          onHandlerStateChange={onHandlerStateChange}
+        >
+          <Animated.View style={{ transform: [{ translateX }] }}>
+            <SprintContent />
+          </Animated.View>
+        </PanGestureHandler>
+      </View>
+    );
+  });
+
+  const renderSprint = ({ item }: { item: Sprint }) => (
+    <SwipeableSprintItem item={item} />
+  );
 
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
@@ -537,8 +685,9 @@ export default function SprintsTab() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']}>
-      <View className="flex-1" style={{ paddingBottom: 80 }}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']}>
+        <View className="flex-1" style={{ paddingBottom: 80 }}>
         {/* Header */}
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
@@ -548,12 +697,12 @@ export default function SprintsTab() {
         {/* Active Sprints Section */}
         <View className="flex-1">
           <View className="p-4 pb-2">
-            <Text className="text-white text-lg font-semibold">Active Sprints</Text>
+            <Text className="text-white text-lg font-semibold">Recent Sprints</Text>
           </View>
           
-          {activeSprints.length > 0 ? (
+          {recentSprints.length > 0 ? (
             <FlatList
-              data={activeSprints}
+              data={recentSprints}
               renderItem={renderSprint}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
@@ -568,7 +717,7 @@ export default function SprintsTab() {
             <View className="flex-1 justify-center items-center px-8">
               <Feather name="zap" size={64} color="gray" />
               <Text className="text-gray-400 text-lg mt-4 text-center">
-                No active sprints
+                No recent sprints
               </Text>
               <Text className="text-gray-500 text-sm mt-2 text-center">
                 Start a sprint in one of your circles below
@@ -715,6 +864,28 @@ export default function SprintsTab() {
           />
         </View>
       )}
+
+      {/* Sprint Completion Modal */}
+      <SprintCompletionModal
+        visible={showCompletionModal}
+        sprintTopic={completionSprintTopic}
+        sprintDuration={completionSprintDuration}
+        onTakeQuiz={() => {
+          setShowCompletionModal(false);
+          setShowQuizModal(true);
+        }}
+      />
+
+      {/* Quiz Modal */}
+      <QuizModal
+        visible={showQuizModal}
+        onClose={() => setShowQuizModal(false)}
+        sprintId={quizSprintId}
+        sprintTopic={quizSprintTopic}
+        circleId={quizCircleId}
+        sprintDuration={quizSprintDuration}
+      />
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 } 
