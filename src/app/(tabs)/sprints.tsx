@@ -34,6 +34,7 @@ export default function SprintsTab() {
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -230,8 +231,22 @@ export default function SprintsTab() {
     };
   }, [loadData]);
 
+  // Update current time every second for real-time countdown
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const renderSprint = ({ item }: { item: Sprint }) => {
     const isMySprintAndActive = item.user_id === user?.id && item.is_active;
+    
+    // Calculate real-time remaining time
+    const endsAt = new Date(item.ends_at).getTime();
+    const timeRemaining = Math.max(0, endsAt - currentTime);
+    const isStillActive = timeRemaining > 0;
     
     return (
       <View className="bg-gray-900 rounded-lg p-4 mb-3 mx-4">
@@ -240,11 +255,16 @@ export default function SprintsTab() {
             <Text className="text-white font-semibold text-lg">{item.topic}</Text>
             <Text className="text-gray-400 text-sm">{item.username} • {item.circle_name}</Text>
           </View>
-          {item.is_active && item.time_remaining && (
-            <View className="bg-blue-500 rounded-full px-3 py-1">
+          {isStillActive && (
+            <View className={`rounded-full px-3 py-1 ${timeRemaining < 5 * 60 * 1000 ? 'bg-red-500' : 'bg-blue-500'}`}>
               <Text className="text-white font-mono text-sm">
-                {formatTimeRemaining(item.time_remaining)}
+                {formatTimeRemaining(timeRemaining)}
               </Text>
+            </View>
+          )}
+          {!isStillActive && item.is_active && (
+            <View className="bg-gray-600 rounded-full px-3 py-1">
+              <Text className="text-white text-sm">Completed</Text>
             </View>
           )}
         </View>
@@ -264,7 +284,7 @@ export default function SprintsTab() {
             Started {new Date(item.started_at).toLocaleTimeString()}
           </Text>
           <View className="flex-row items-center space-x-3">
-            {isMySprintAndActive && (
+            {isMySprintAndActive && isStillActive && (
               <TouchableOpacity 
                 onPress={() => endSprint(item.id, item.topic)}
                 className="flex-row items-center mr-3"
