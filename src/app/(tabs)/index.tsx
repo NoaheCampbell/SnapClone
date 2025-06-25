@@ -237,7 +237,7 @@ export default function CameraScreen() {
         setPendingCapture(true);
 
         // Wait until onLoadEnd triggers the capture (with a safety timeout)
-        await new Promise(res => setTimeout(res, 3500));
+        await new Promise(res => setTimeout(res, 200));
 
         if (pendingCapture) {
           // onLoadEnd never fired within timeout — fall back
