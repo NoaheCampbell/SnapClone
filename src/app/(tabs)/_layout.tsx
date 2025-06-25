@@ -22,6 +22,12 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
+        name="index"
+        options={{
+          href: null, // Hide this tab from the tab bar
+        }}
+      />
+      <Tabs.Screen
         name="friends"
         options={{
           tabBarIcon: ({ color }) => <Feather name="users" size={28} color={color} />,
@@ -37,6 +43,12 @@ export default function TabLayout() {
         name="sprints"
         options={{
           tabBarIcon: ({ color }) => <Feather name="zap" size={28} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          tabBarIcon: ({ color }) => <Feather name="settings" size={28} color={color} />,
         }}
       />
     </Tabs>
