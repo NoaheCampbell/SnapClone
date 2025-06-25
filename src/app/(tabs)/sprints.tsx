@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
@@ -10,6 +10,7 @@ import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
 import QuizModal from '../../components/QuizModal';
 import SprintCompletionModal from '../../components/SprintCompletionModal';
+import QuizResultsModal from '../../components/QuizResultsModal';
 
 interface Sprint {
   id: string;
@@ -64,6 +65,9 @@ export default function SprintsTab() {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completionSprintTopic, setCompletionSprintTopic] = useState<string>('');
   const [completionSprintDuration, setCompletionSprintDuration] = useState<number>(25);
+  const [showQuizResultsModal, setShowQuizResultsModal] = useState(false);
+  const [resultsSprintId, setResultsSprintId] = useState<string>('');
+  const [resultsSprintTopic, setResultsSprintTopic] = useState<string>('');
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -479,6 +483,12 @@ export default function SprintsTab() {
     setShowSprintModal(true);
   };
 
+  const openQuizResults = (sprintId: string, sprintTopic: string) => {
+    setResultsSprintId(sprintId);
+    setResultsSprintTopic(sprintTopic);
+    setShowQuizResultsModal(true);
+  };
+
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
     try {
       console.log(`Generating ${questionCount} quiz questions for sprint: ${topic}`);
@@ -777,6 +787,15 @@ Return the response in this exact JSON format:
                 <Text className="text-red-400 text-sm ml-1">End</Text>
               </TouchableOpacity>
             )}
+            {!isStillActive && (
+              <TouchableOpacity 
+                onPress={() => openQuizResults(item.id, item.topic)}
+                className="flex-row items-center mr-3"
+              >
+                <Feather name="help-circle" size={16} color="#A78BFA" />
+                <Text className="text-purple-400 text-sm ml-1">Quiz</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity 
               onPress={() => router.push(`/(modals)/chat?circleId=${item.circle_id}`)}
               className="flex-row items-center"
@@ -923,7 +942,8 @@ Return the response in this exact JSON format:
         presentationStyle="pageSheet"
       >
         <SafeAreaView className="flex-1 bg-black">
-          <View className="flex-1">
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View className="flex-1">
             {/* Header */}
             <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
               <TouchableOpacity onPress={() => {
@@ -1041,7 +1061,8 @@ Return the response in this exact JSON format:
                 </Text>
               </View>
             </View>
-          </View>
+            </View>
+          </TouchableWithoutFeedback>
         </SafeAreaView>
       </Modal>
 
@@ -1092,6 +1113,14 @@ Return the response in this exact JSON format:
         circleId={quizCircleId}
         sprintDuration={quizSprintDuration}
         questionCount={selectedQuizQuestionCount}
+      />
+
+      {/* Quiz Results Modal */}
+      <QuizResultsModal
+        visible={showQuizResultsModal}
+        onClose={() => setShowQuizResultsModal(false)}
+        sprintId={resultsSprintId}
+        sprintTopic={resultsSprintTopic}
       />
     </SafeAreaView>
     </GestureHandlerRootView>

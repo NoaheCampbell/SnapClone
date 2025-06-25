@@ -45,7 +45,12 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, spr
   const [userAnswers, setUserAnswers] = useState<number[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [showResults, setShowResults] = useState(false);
+  const [showDetailedResults, setShowDetailedResults] = useState(false);
   const [score, setScore] = useState(0);
+  const [correctAnswers, setCorrectAnswers] = useState<number[]>([]);
+  const [improvementSuggestions, setImprovementSuggestions] = useState<string[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [wrongAnswerAnalysis, setWrongAnswerAnalysis] = useState<string[]>([]);
   const [hasAlreadyTaken, setHasAlreadyTaken] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [quizTimeLimit, setQuizTimeLimit] = useState(0);
@@ -340,8 +345,68 @@ Return the response in this exact JSON format:
     setUserAnswers(newAnswers);
   };
 
-  const nextQuestion = () => {
-    if (currentQuestionIndex < (quiz?.mcq_json.questions.length || 0) - 1) {
+  const analyzeWrongAnswer = async (question: QuizQuestion, userAnswerIndex: number, correctAnswerIndex: number) => {
+    try {
+      const userAnswer = question.options[userAnswerIndex];
+      const correctAnswer = question.options[correctAnswerIndex];
+      
+      const prompt = `A student studying "${sprintTopic}" just answered this question incorrectly:
+
+Question: ${question.question}
+Their answer: ${userAnswer}
+Correct answer: ${correctAnswer}
+
+Provide ONE specific, actionable study tip to help them understand this concept better. Keep it concise (1-2 sentences) and avoid using markdown formatting like asterisks or bold text. Start with an emoji.`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful study coach. Provide specific, actionable study tips without using markdown formatting. Use plain text only with emojis at the start.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 100,
+          temperature: 0.7
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const tip = data.choices[0].message.content.trim();
+        
+        // Add this tip to our collection
+        setWrongAnswerAnalysis(prev => [...prev, tip]);
+      }
+    } catch (error) {
+      console.error('Error analyzing wrong answer:', error);
+    }
+  };
+
+  const nextQuestion = async () => {
+    if (!quiz) return;
+    
+    // Check if current answer is wrong and analyze it
+    const currentQuestion = quiz.mcq_json.questions[currentQuestionIndex];
+    const userAnswer = userAnswers[currentQuestionIndex];
+    const correctAnswer = currentQuestion.correct_answer;
+    
+    if (userAnswer !== correctAnswer && userAnswer !== -1) {
+      // Analyze this wrong answer in the background
+      analyzeWrongAnswer(currentQuestion, userAnswer, correctAnswer);
+    }
+    
+    if (currentQuestionIndex < quiz.mcq_json.questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     }
   };
@@ -366,18 +431,40 @@ Return the response in this exact JSON format:
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Calculate score
-      let correctAnswers = 0;
+      // Calculate score and store correct answers
+      const correctAnswersArray = quiz.mcq_json.questions.map(q => q.correct_answer);
+      setCorrectAnswers(correctAnswersArray);
+      
+      let correctCount = 0;
       quiz.mcq_json.questions.forEach((question, index) => {
         if (userAnswers[index] === question.correct_answer) {
-          correctAnswers++;
+          correctCount++;
         }
       });
 
-      const finalScore = Math.round((correctAnswers / quiz.mcq_json.questions.length) * 100);
+      const finalScore = Math.round((correctCount / quiz.mcq_json.questions.length) * 100);
       setScore(finalScore);
 
-      // Save quiz attempt (only if quiz has a real database ID)
+      // Generate improvement suggestions
+      setLoadingSuggestions(true);
+      let finalSuggestions: string[] = [];
+      try {
+        finalSuggestions = await generateFinalSuggestions(correctCount);
+        setImprovementSuggestions(finalSuggestions);
+      } catch (error) {
+        console.error('Error generating suggestions:', error);
+        finalSuggestions = [
+          "💡 Here are some general study tips:",
+          "• Review the specific topics you found challenging",
+          "• Use active recall techniques during your next study session",
+          "🚀 Every mistake is a learning opportunity!"
+        ];
+        setImprovementSuggestions(finalSuggestions);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+
+      // Save quiz attempt with improvement suggestions (only if quiz has a real database ID)
       if (!quiz.id.startsWith('temp_')) {
         const { error } = await supabase
           .from('quiz_attempts')
@@ -385,7 +472,8 @@ Return the response in this exact JSON format:
             quiz_id: quiz.id,
             user_id: user.id,
             score: finalScore,
-            answers: userAnswers
+            answers: userAnswers,
+            improvement_suggestions: finalSuggestions
           });
 
         if (error) throw error;
@@ -422,12 +510,55 @@ Return the response in this exact JSON format:
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const generateFinalSuggestions = async (correctCount: number) => {
+    if (!quiz) return [];
+    
+    const totalQuestions = quiz.mcq_json.questions.length;
+    const wrongCount = totalQuestions - correctCount;
+    
+    if (wrongCount === 0) {
+      return ["🎉 Perfect score! You've mastered this topic. Keep up the excellent work!"];
+    }
+
+    // Combine progressive analysis with a final summary
+    const suggestions: string[] = [];
+    
+    // Add the progressive analysis tips we collected
+    if (wrongAnswerAnalysis.length > 0) {
+      suggestions.push(`You missed ${wrongCount} out of ${totalQuestions} questions. Here's how to improve:`);
+      suggestions.push(...wrongAnswerAnalysis);
+    }
+    
+    // Add general study strategies based on performance
+    if (wrongCount > totalQuestions / 2) {
+      suggestions.push("💡 Since you missed several questions, consider:");
+      suggestions.push(`   • Breaking down ${sprintTopic} into smaller subtopics`);
+      suggestions.push("   • Creating flashcards for key concepts you missed");
+      suggestions.push("   • Teaching the material to someone else to test your understanding");
+    } else {
+      suggestions.push("💡 To master the areas you missed:");
+      suggestions.push("   • Create summary notes for the specific concepts you got wrong");
+      suggestions.push("   • Use the Feynman Technique to explain these topics simply");
+    }
+    
+    suggestions.push("🚀 Remember: Every mistake is a learning opportunity. You're making progress!");
+    
+    return suggestions;
+  };
+
+
+
   const handleClose = () => {
     setQuiz(null);
     setUserAnswers([]);
     setCurrentQuestionIndex(0);
     setShowResults(false);
+    setShowDetailedResults(false);
     setScore(0);
+    setCorrectAnswers([]);
+    setImprovementSuggestions([]);
+    setLoadingSuggestions(false);
+    setWrongAnswerAnalysis([]);
     setHasAlreadyTaken(false);
     setTimeRemaining(0);
     setQuizTimeLimit(0);
@@ -475,6 +606,88 @@ Return the response in this exact JSON format:
               <Text className="text-white font-semibold">Close</Text>
             </TouchableOpacity>
           </View>
+        ) : showDetailedResults ? (
+          <ScrollView className="flex-1 p-4">
+            <View className="mb-6">
+              <Text className="text-white text-2xl font-bold mb-2">Quiz Results</Text>
+              <Text className="text-gray-400 text-lg">Your score: {score}%</Text>
+            </View>
+
+            {/* Question by Question Results */}
+            {quiz && quiz.mcq_json.questions.map((question, index) => {
+              const isCorrect = userAnswers[index] === correctAnswers[index];
+              const userAnswerText = question.options[userAnswers[index]] || "No answer";
+              const correctAnswerText = question.options[correctAnswers[index]];
+              
+              return (
+                <View key={index} className="mb-6 p-4 bg-gray-900 rounded-lg">
+                  <View className="flex-row items-center mb-2">
+                    <Feather 
+                      name={isCorrect ? "check-circle" : "x-circle"} 
+                      size={20} 
+                      color={isCorrect ? "#10B981" : "#EF4444"} 
+                    />
+                    <Text className="text-white font-semibold ml-2">
+                      Question {index + 1}
+                    </Text>
+                  </View>
+                  
+                  <Text className="text-gray-300 mb-3">{question.question}</Text>
+                  
+                  <View className="space-y-2">
+                    <View className={`p-2 rounded ${isCorrect ? 'bg-green-900/30' : 'bg-red-900/30'}`}>
+                      <Text className="text-gray-400 text-xs">Your answer:</Text>
+                      <Text className={`${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+                        {userAnswerText}
+                      </Text>
+                    </View>
+                    
+                    {!isCorrect && (
+                      <View className="p-2 rounded bg-green-900/30">
+                        <Text className="text-gray-400 text-xs">Correct answer:</Text>
+                        <Text className="text-green-400">{correctAnswerText}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Improvement Suggestions */}
+            <View className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-800">
+              <Text className="text-blue-400 text-lg font-semibold mb-3">
+                💡 How to Improve
+              </Text>
+              {loadingSuggestions ? (
+                <View className="flex-row items-center">
+                  <ActivityIndicator size="small" color="#60A5FA" />
+                  <Text className="text-gray-400 ml-2">Generating personalized tips...</Text>
+                </View>
+              ) : (
+                improvementSuggestions.map((suggestion, index) => (
+                  <Text key={index} className="text-gray-300 mb-2">
+                    {suggestion}
+                  </Text>
+                ))
+              )}
+            </View>
+
+            {/* Action Buttons */}
+            <View className="flex-row space-x-3 mb-6">
+              <TouchableOpacity
+                onPress={() => setShowDetailedResults(false)}
+                className="flex-1 bg-gray-700 px-4 py-3 rounded-lg"
+              >
+                <Text className="text-white font-semibold text-center">Back to Summary</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleClose}
+                className="flex-1 bg-green-500 px-4 py-3 rounded-lg"
+              >
+                <Text className="text-white font-semibold text-center">Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         ) : showResults ? (
           <View className="flex-1 justify-center items-center p-6">
             <Feather 
@@ -487,12 +700,21 @@ Return the response in this exact JSON format:
             <Text className="text-gray-500 text-sm mt-2 text-center">
               {score >= 70 ? "Great job! You really focused during that sprint." : "Good effort! Every sprint helps you learn and grow."}
             </Text>
-            <TouchableOpacity
-              onPress={handleClose}
-              className="bg-green-500 px-6 py-3 rounded-lg mt-6"
-            >
-              <Text className="text-white font-semibold">Continue</Text>
-            </TouchableOpacity>
+            
+            <View className="flex-row space-x-3 mt-6">
+              <TouchableOpacity
+                onPress={() => setShowDetailedResults(true)}
+                className="bg-blue-500 px-4 py-3 rounded-lg"
+              >
+                <Text className="text-white font-semibold">View Details</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleClose}
+                className="bg-green-500 px-4 py-3 rounded-lg"
+              >
+                <Text className="text-white font-semibold">Continue</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : quiz ? (
           <View className="flex-1">
