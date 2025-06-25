@@ -208,6 +208,10 @@ export default function CameraScreen() {
 
     try {
       setIsCapturing(true);
+      
+      // Deselect any selected text to avoid UI conflicts during capture
+      setSelectedTextId(null);
+      
       console.log('Taking picture...');
       
       const photo = await cameraRef.current.takePictureAsync();
@@ -218,11 +222,11 @@ export default function CameraScreen() {
 
       let finalUri = photo.uri;
 
-      // If a filter is selected, we need to render the captured photo with overlay and
-      // then snapshot the combined view.  To avoid the race condition where the
-      // snapshot occurs before the <Image> finishes decoding (resulting in a solid
-      // coloured frame), we defer captureRef until the Image's onLoadEnd fires.
-      if (selectedFilter.id !== 'none') {
+      // If a filter is selected OR there are text overlays, we need to render the captured photo
+      // with overlay/text and then snapshot the combined view. To avoid the race condition where the
+      // snapshot occurs before the <Image> finishes decoding (resulting in a solid coloured frame),
+      // we defer captureRef until the Image's onLoadEnd fires.
+      if (selectedFilter.id !== 'none' || textOverlays.length > 0) {
         setCapturedPhoto(photo.uri);
         setPhotoLoaded(false);
         setControlsVisible(false);
@@ -243,12 +247,17 @@ export default function CameraScreen() {
           finalUri = captureResultRef.current;
           captureResultRef.current = undefined;
         }
+        
+        // Store finalUri and show post options modal
+        setCapturedPhoto(finalUri);
+        setPhotoLoaded(true);
+        setPostOptionsVisible(true);
+      } else {
+        // No filter or text overlays - just show the original photo
+        setCapturedPhoto(finalUri);
+        setPhotoLoaded(true);
+        setPostOptionsVisible(true);
       }
-
-      // Store finalUri and show post options modal
-      setCapturedPhoto(finalUri);
-      setPhotoLoaded(true);
-      setPostOptionsVisible(true);
       
     } catch (error) {
       console.error('Error capturing photo:', error);
@@ -586,8 +595,8 @@ export default function CameraScreen() {
             bottom: 0,
             pointerEvents: 'box-none'
           }}>
-            {/* Text overlays */}
-            {textOverlays.map((textOverlay) => (
+            {/* Text overlays - always visible when not in editing mode or when capturing */}
+            {(!postOptionsVisible || pendingCapture) && textOverlays.map((textOverlay) => (
               <DraggableText key={`${textOverlay.id}-${textOverlay.isEditing}`} textOverlay={textOverlay} />
             ))}
 
