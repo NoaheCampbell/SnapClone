@@ -69,7 +69,9 @@ interface Message {
 }
 
 export default function ChatScreen() {
-  const { channelId } = useLocalSearchParams<{ channelId: string }>()
+  const params = useLocalSearchParams<{ circleId?: string; channelId?: string }>()
+  const channelId = (params.circleId ?? params.channelId) as string | undefined
+  const isCircle = !!params.circleId
   const insets = useSafeAreaInsets()
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
@@ -87,6 +89,10 @@ export default function ChatScreen() {
   }>>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+  const [showAddMembers, setShowAddMembers] = useState(false)
+  const [availableFriends, setAvailableFriends] = useState<Array<{user_id: string, username: string}>>([])
+  const [selectedNewMembers, setSelectedNewMembers] = useState<string[]>([])
+  const [addingMembers, setAddingMembers] = useState(false)
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
@@ -220,7 +226,12 @@ export default function ChatScreen() {
 
   const loadChatInfo = async () => {
     try {
-      const { data, error } = await supabase.rpc('get_chat_details', { p_channel_id: channelId })
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const functionName = isCircle ? 'get_circle_details' : 'get_chat_details'
+      const parameterName = isCircle ? 'p_circle_id' : 'p_channel_id'
+      const { data, error } = await supabase.rpc(functionName, { [parameterName]: channelId })
 
       if (error) {
         // Check if the error is due to access denied (user no longer in chat)
@@ -230,11 +241,23 @@ export default function ChatScreen() {
         throw error
       }
 
-      const { is_group, participants } = data
-      if (is_group) {
-        setChatTitle(participants?.map((p: any) => p.username).join(', ') || 'Group')
+      if (isCircle) {
+        // For circles, data is a jsonb object with members array
+        const members = data?.members || []
+        const otherMembers = members.filter((m: any) => m.user_id !== user.id)
+        setChatTitle(otherMembers.map((m: any) => m.username).join(', ') || 'Circle')
       } else {
-        setChatTitle(participants?.[0]?.username || 'Chat')
+        // For old channels, use the original format
+        const { is_group, participants } = data
+        if (is_group) {
+          // Filter out current user from the title
+          const otherParticipants = participants?.filter((p: any) => p.user_id !== user.id) || []
+          setChatTitle(otherParticipants.map((p: any) => p.username).join(', ') || 'Group')
+        } else {
+          // For 1-on-1, show the other person's name
+          const otherParticipant = participants?.find((p: any) => p.user_id !== user.id)
+          setChatTitle(otherParticipant?.username || 'Chat')
+        }
       }
     } catch (error) {
       console.error('Error loading chat info:', error)
@@ -494,29 +517,29 @@ export default function ChatScreen() {
       if (!auth.user) return
 
       const { error } = await supabase
-        .from('channel_members')
+        .from('circle_members')
         .delete()
-        .eq('channel_id', channelId)
-        .eq('member_id', auth.user.id)
+        .eq('circle_id', channelId)
+        .eq('user_id', auth.user.id)
 
       if (error) {
-        console.error('Error leaving chat:', error)
-        Alert.alert('Error', 'Unable to leave chat. Please try again.')
+        console.error('Error leaving circle:', error)
+        Alert.alert('Error', 'Unable to leave circle. Please try again.')
         return
       }
 
-      // Broadcast an event to notify other parts of the app that the user left a chat
-      supabase.channel('chat-updates').send({
+      // Broadcast an event to notify other parts of the app that the user left a circle
+      supabase.channel('circle-updates').send({
         type: 'broadcast',
-        event: 'user-left-chat',
-        payload: { userId: auth.user.id, channelId }
+        event: 'user-left-circle',
+        payload: { userId: auth.user.id, circleId: channelId }
       })
 
       // After leaving, go back to inbox immediately
       router.back()
     } catch (err) {
-      console.error('Error leaving chat:', err)
-      Alert.alert('Error', 'Unable to leave chat. Please try again.')
+      console.error('Error leaving circle:', err)
+      Alert.alert('Error', 'Unable to leave circle. Please try again.')
     }
   }
 
@@ -633,6 +656,97 @@ export default function ChatScreen() {
     setSuggestions([]) // Hide suggestions after selection
   }
 
+  // Load friends who aren't already in the circle
+  const loadAvailableFriends = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Get current circle members
+      const { data: members } = await supabase
+        .from('circle_members')
+        .select('user_id')
+        .eq('circle_id', channelId)
+
+      const memberIds = members?.map(m => m.user_id) || []
+
+      // Get user's friends who aren't already in the circle
+      const { data: friends } = await supabase
+        .from('friends')
+        .select(`
+          friend_id,
+          profiles!friends_friend_id_fkey (
+            user_id,
+            username
+          )
+        `)
+        .eq('user_id', user.id)
+        .not('friend_id', 'in', `(${memberIds.join(',')})`)
+
+      const availableFriendsList = friends?.map((f: any) => ({
+        user_id: f.profiles.user_id,
+        username: f.profiles.username
+      })) || []
+
+      setAvailableFriends(availableFriendsList)
+    } catch (error) {
+      console.error('Error loading available friends:', error)
+    }
+  }
+
+  // Add selected members to the circle
+  const addMembersToCircle = async () => {
+    if (selectedNewMembers.length === 0 || addingMembers) return
+
+    try {
+      setAddingMembers(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Add new members to circle_members table
+      const newMembers = selectedNewMembers.map(userId => ({
+        circle_id: channelId,
+        user_id: userId,
+        role: 'member'
+      }))
+
+      const { error: membersError } = await supabase
+        .from('circle_members')
+        .insert(newMembers)
+
+      if (membersError) throw membersError
+
+      // Get the usernames of added members for the system message
+      const addedUsernames = availableFriends
+        .filter(f => selectedNewMembers.includes(f.user_id))
+        .map(f => f.username)
+
+      // Send a system message about the addition
+      const { error: messageError } = await supabase
+        .from('messages')
+        .insert({
+          channel_id: channelId,
+          circle_id: channelId,
+          sender_id: user.id,
+          content: `${addedUsernames.join(', ')} ${addedUsernames.length === 1 ? 'was' : 'were'} added to the circle`
+        })
+
+      if (messageError) console.error('Error sending system message:', messageError)
+
+      // Reset state
+      setSelectedNewMembers([])
+      setShowAddMembers(false)
+      
+      // Reload chat info to update the title
+      loadChatInfo()
+    } catch (error) {
+      console.error('Error adding members:', error)
+      Alert.alert('Error', 'Failed to add members to the circle')
+    } finally {
+      setAddingMembers(false)
+    }
+  }
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black">
@@ -653,6 +767,14 @@ export default function ChatScreen() {
         <Text className="text-white text-lg font-semibold flex-1">
           {chatTitle}
         </Text>
+        {isCircle && (
+          <TouchableOpacity onPress={() => {
+            setShowAddMembers(true)
+            loadAvailableFriends()
+          }} className="mr-3">
+            <Feather name="user-plus" size={22} color="white" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity onPress={confirmLeaveChat}>
           <Feather name="trash-2" size={22} color="white" />
         </TouchableOpacity>
@@ -787,6 +909,79 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Add Members Modal */}
+      {showAddMembers && (
+        <View className="absolute inset-0 bg-black/50 justify-center items-center">
+          <View className="bg-gray-900 rounded-lg w-4/5 max-h-96">
+            <View className="flex-row items-center justify-between p-4 border-b border-gray-700">
+              <Text className="text-white text-lg font-semibold">Add Members</Text>
+              <TouchableOpacity onPress={() => {
+                setShowAddMembers(false)
+                setSelectedNewMembers([])
+              }}>
+                <Feather name="x" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+            
+            <View className="max-h-64">
+              <FlatList
+                data={availableFriends}
+                keyExtractor={(item) => item.user_id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedNewMembers(prev =>
+                        prev.includes(item.user_id)
+                          ? prev.filter(id => id !== item.user_id)
+                          : [...prev, item.user_id]
+                      )
+                    }}
+                    className="flex-row items-center p-4 border-b border-gray-800"
+                  >
+                    <View className="w-10 h-10 rounded-full bg-gray-600 items-center justify-center mr-3">
+                      <Feather name="user" size={18} color="white" />
+                    </View>
+                    <Text className="text-white flex-1">{item.username}</Text>
+                    <View className={`w-5 h-5 rounded-full border-2 items-center justify-center ${
+                      selectedNewMembers.includes(item.user_id) ? 'bg-blue-500 border-blue-500' : 'border-gray-400'
+                    }`}>
+                      {selectedNewMembers.includes(item.user_id) && (
+                        <Feather name="check" size={12} color="white" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={() => (
+                  <View className="p-8 items-center">
+                    <Feather name="users" size={48} color="gray" />
+                    <Text className="text-gray-400 text-center mt-4">
+                      No friends available to add
+                    </Text>
+                    <Text className="text-gray-500 text-sm text-center mt-2">
+                      All your friends are already in this circle
+                    </Text>
+                  </View>
+                )}
+              />
+            </View>
+
+            <View className="p-4 border-t border-gray-700">
+              <TouchableOpacity
+                onPress={addMembersToCircle}
+                disabled={selectedNewMembers.length === 0 || addingMembers}
+                className={`py-3 rounded-lg items-center ${
+                  selectedNewMembers.length > 0 && !addingMembers ? 'bg-blue-500' : 'bg-gray-600'
+                }`}
+              >
+                <Text className="text-white font-semibold">
+                  {addingMembers ? 'Adding...' : `Add ${selectedNewMembers.length} Member${selectedNewMembers.length !== 1 ? 's' : ''}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   )
 } 

@@ -40,9 +40,9 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="stories"
+        name="sprints"
         options={{
-          tabBarIcon: ({ color }) => <Feather name="book-open" size={28} color={color} />,
+          tabBarIcon: ({ color }) => <Feather name="zap" size={28} color={color} />,
         }}
       />
     </Tabs>

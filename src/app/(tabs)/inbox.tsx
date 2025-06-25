@@ -1,33 +1,29 @@
-import { View, Text, FlatList, TouchableOpacity, Image } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
 
-interface Chat {
+interface CirclePreview {
   id: string
-  is_group: boolean
-  last_message?: {
-    content: string
-    created_at: string
-    sender_name: string
-  }
-  participants: {
-    user_id: string
-    username: string
-    avatar_url?: string
-  }[]
+  name: string
+  visibility: string
+  sprint_minutes: number
+  ttl_minutes: number
+  role: string
+  member_count: number
+  last_message_at: string | null
 }
 
 export default function InboxScreen() {
-  const [chats, setChats] = useState<Chat[]>([])
+  const [circles, setCircles] = useState<CirclePreview[]>([])
   const [loading, setLoading] = useState(true)
 
   // Refresh chats when the screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      loadChats()
+      loadCircles()
     }, [])
   )
 
@@ -40,11 +36,11 @@ export default function InboxScreen() {
       if (!user) return
 
       // Make sure we start with fresh data
-      loadChats()
+      loadCircles()
 
       // Set up periodic refresh every 30 seconds as a fallback
       refreshInterval = setInterval(() => {
-        loadChats()
+        loadCircles()
       }, 30000)
 
       channel = supabase
@@ -52,7 +48,7 @@ export default function InboxScreen() {
         // Listen for broadcast events when users leave chats
         .on('broadcast', { event: 'user-left-chat' }, (payload) => {
           console.log('Received user-left-chat broadcast, refreshing chats')
-          loadChats()
+          loadCircles()
         })
         // Someone just added *this* user to a channel (a new chat was created)
         .on(
@@ -60,12 +56,12 @@ export default function InboxScreen() {
           {
             event: 'INSERT',
             schema: 'public',
-            table: 'channel_members',
-            filter: `member_id=eq.${user.id}`,
+            table: 'circle_members',
+            filter: `user_id=eq.${user.id}`,
           },
           () => {
-            console.log('User added to channel, refreshing chats')
-            loadChats()
+            console.log('Added to circle, refreshing list')
+            loadCircles()
           }
         )
         // Someone removed *this* user from a channel (they left or were removed)
@@ -74,12 +70,12 @@ export default function InboxScreen() {
           {
             event: 'DELETE',
             schema: 'public',
-            table: 'channel_members',
-            filter: `member_id=eq.${user.id}`,
+            table: 'circle_members',
+            filter: `user_id=eq.${user.id}`,
           },
           () => {
-            console.log('User removed from channel, refreshing chats')
-            loadChats()
+            console.log('Removed from circle, refreshing list')
+            loadCircles()
           }
         )
         // A brand-new message landed anywhere – cheaper to just refresh the list
@@ -90,7 +86,7 @@ export default function InboxScreen() {
             schema: 'public',
             table: 'messages',
           },
-          () => loadChats()
+          () => loadCircles()
         )
         // A message was deleted (e.g., by cron job) – refresh to update last message
         .on(
@@ -102,7 +98,7 @@ export default function InboxScreen() {
           },
           () => {
             console.log('Message deleted, refreshing chats')
-            loadChats()
+            loadCircles()
           }
         )
         .subscribe()
@@ -116,19 +112,19 @@ export default function InboxScreen() {
     }
   }, [])
 
-  const loadChats = async () => {
+  const loadCircles = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.rpc('get_user_chats')
+      const { data, error } = await supabase.rpc('get_user_circles')
 
       if (error) {
-        console.error('Error loading chats via rpc:', error)
+        console.error('Error loading circles via rpc:', error)
         throw error
       }
       
-      setChats(data as any[] || [])
+      setCircles(data as any[] || [])
     } catch (error) {
-      console.error('Error loading chats:', error)
+      console.error('Error loading circles:', error)
     } finally {
       setLoading(false)
     }
@@ -149,65 +145,40 @@ export default function InboxScreen() {
     }
   }
 
-  const getChatDisplayName = (chat: Chat) => {
-    if (!chat.participants) {
-      return chat.is_group ? 'Group' : 'Chat'
-    }
-    if (chat.is_group) {
-      return chat.participants.map(p => p.username).join(', ')
-    }
-    return chat.participants[0]?.username || 'Unknown'
-  }
+  const getCircleDisplayName = (circle: CirclePreview) => circle.name
 
-  const getChatAvatar = (chat: Chat) => {
-    if (chat.is_group || !chat.participants || chat.participants.length === 0) {
-      return null // Could show group icon
-    }
-    return chat.participants[0]?.avatar_url
-  }
+  // For now we don't have per-member avatars for circles; return null to show default icon
+  const getCircleAvatar = (_circle: CirclePreview) => null
 
-  const renderChatItem = ({ item }: { item: Chat }) => (
+  const renderCircleItem = ({ item }: { item: CirclePreview }) => (
     <TouchableOpacity
-      onPress={() => router.push(`/(modals)/chat?channelId=${item.id}`)}
+      onPress={() => router.push(`/(modals)/chat?circleId=${item.id}`)}
       className="flex-row items-center p-4 border-b border-gray-800"
     >
       <View className="w-12 h-12 rounded-full bg-gray-600 items-center justify-center mr-3">
-        {getChatAvatar(item) ? (
-          <Image 
-            source={{ uri: getChatAvatar(item)! }} 
-            className="w-12 h-12 rounded-full"
-          />
-        ) : (
-          <Feather 
-            name={item.is_group ? "users" : "user"} 
-            size={20} 
-            color="white" 
-          />
-        )}
+        <Feather name="users" size={20} color="white" />
       </View>
       
       <View className="flex-1">
         <View className="flex-row justify-between items-center mb-1">
           <Text className="text-white font-semibold text-base">
-            {getChatDisplayName(item)}
+            {getCircleDisplayName(item)}
           </Text>
-          {item.last_message && (
-            <Text className="text-gray-400 text-sm">
-              {formatTime(item.last_message.created_at)}
+          {item.last_message_at ? (
+            <Text className="text-gray-400 text-sm" numberOfLines={1}>
+              Last activity {formatTime(item.last_message_at)} ago
+            </Text>
+          ) : (
+            <Text className="text-gray-500 text-sm italic">
+              No activity yet
             </Text>
           )}
         </View>
         
-        {item.last_message ? (
-          <Text className="text-gray-400 text-sm" numberOfLines={1}>
-            {item.is_group && `${item.last_message.sender_name}: `}
-            {item.last_message.content}
-          </Text>
-        ) : (
-          <Text className="text-gray-500 text-sm italic">
-            No messages yet
-          </Text>
-        )}
+        {/* Placeholder for future last-message preview */}
+        <Text className="text-gray-500 text-sm italic">
+          {item.member_count} member{item.member_count !== 1 ? 's' : ''}
+        </Text>
       </View>
     </TouchableOpacity>
   )
@@ -216,7 +187,7 @@ export default function InboxScreen() {
     return (
       <SafeAreaView className="flex-1 bg-black">
         <View className="flex-1 justify-center items-center">
-          <Text className="text-white">Loading chats...</Text>
+          <Text className="text-white">Loading circles...</Text>
         </View>
       </SafeAreaView>
     )
@@ -227,17 +198,17 @@ export default function InboxScreen() {
       <View className="flex-1">
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
-          <Text className="text-white text-xl font-bold">Chats</Text>
+          <Text className="text-white text-xl font-bold">Circles</Text>
           <TouchableOpacity onPress={() => router.push('/(modals)/new-chat')}>
             <Feather name="edit" size={24} color="white" />
           </TouchableOpacity>
         </View>
 
-        {/* Chat List */}
-        {chats.length > 0 ? (
+        {/* Circle List */}
+        {circles.length > 0 ? (
           <FlatList
-            data={chats}
-            renderItem={renderChatItem}
+            data={circles}
+            renderItem={renderCircleItem}
             keyExtractor={(item) => item.id}
             className="flex-1"
           />
@@ -245,7 +216,7 @@ export default function InboxScreen() {
           <View className="flex-1 justify-center items-center p-8">
             <Feather name="message-circle" size={64} color="gray" />
             <Text className="text-gray-400 text-lg mt-4 text-center">
-              No chats yet
+              No circles yet
             </Text>
             <Text className="text-gray-500 text-sm mt-2 text-center">
               Start a conversation with your friends
@@ -254,7 +225,7 @@ export default function InboxScreen() {
               onPress={() => router.push('/(modals)/new-chat')}
               className="bg-blue-500 px-6 py-3 rounded-full mt-6"
             >
-              <Text className="text-white font-semibold">Start Chat</Text>
+              <Text className="text-white font-semibold">Start Circle</Text>
             </TouchableOpacity>
           </View>
         )}

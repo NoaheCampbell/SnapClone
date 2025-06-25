@@ -84,53 +84,66 @@ export default function NewChatScreen() {
       const myId = auth.user.id
 
       // -----------------------------------------------------------
-      // 1. Check for an existing chat with *exactly* this member set
+      // 1. Check for an existing circle with *exactly* this member set
       // -----------------------------------------------------------
       const desiredMemberIds = [myId, ...selectedFriends].sort()
 
-      const { data: existingChats, error: existingErr } = await supabase
-        .rpc('get_user_chats')
+      const { data: existingCircles, error: existingErr } = await supabase
+        .rpc('get_user_circles')
 
       if (existingErr) throw existingErr
 
-      if (existingChats && existingChats.length > 0) {
-        const match = (existingChats as any[]).find(chat => {
-          // existing RPC returns participants array without current user
-          const participantIds = [myId, ...chat.participants?.map((p: any) => p.user_id) ?? []].sort()
-          return participantIds.length === desiredMemberIds.length &&
-            participantIds.every((id: string, idx: number) => id === desiredMemberIds[idx])
-        })
-
-        if (match) {
-          // Chat already exists – just navigate
-          router.replace(`/(modals)/chat?channelId=${match.id}`)
-          return
-        }
+      if (existingCircles && existingCircles.length > 0) {
+        // For now, just create a new circle - we can add duplicate detection later
+        // TODO: Check if circle with same members already exists
       }
 
       // -----------------------------------------------------------
-      // 2. No existing chat – create a new channel and add members
+      // 2. Create a new circle directly in the database
       // -----------------------------------------------------------
-      const { data: channel, error: channelError } = await supabase
-        .from('channels')
-        .insert({ is_group: selectedFriends.length > 1 })
+      const friendsUsernames = friends
+        .filter(f => selectedFriends.includes(f.user_id))
+        .map(f => f.username)
+        .join(', ')
+      
+      const circleName = friendsUsernames || 'New Circle'
+
+      // Create the circle
+      const { data: circleData, error: circleError } = await supabase
+        .from('circles')
+        .insert({
+          name: circleName,
+          owner: myId,
+          visibility: 'private',
+          sprint_minutes: 25,
+          ttl_minutes: 30
+        })
         .select()
         .single()
 
-      if (channelError) throw channelError
+      if (circleError) throw circleError
 
-      const members = [myId, ...selectedFriends]
+      // -----------------------------------------------------------
+      // 3. Add all members to the circle (including creator as owner)
+      // -----------------------------------------------------------
+      const allMembers = [
+        { circle_id: circleData.id, user_id: myId, role: 'owner' },
+        ...selectedFriends.map(friendId => ({ 
+          circle_id: circleData.id, 
+          user_id: friendId,
+          role: 'member'
+        }))
+      ]
+
       const { error: membersError } = await supabase
-        .from('channel_members')
-        .insert(
-          members.map(memberId => ({ channel_id: channel.id, member_id: memberId }))
-        )
+        .from('circle_members')
+        .insert(allMembers)
 
       if (membersError) throw membersError
 
-      router.replace(`/(modals)/chat?channelId=${channel.id}`)
+      router.replace(`/(modals)/chat?circleId=${circleData.id}`)
     } catch (error) {
-      console.error('Error creating chat:', error)
+      console.error('Error creating circle:', error)
     } finally {
       setCreating(false)
     }

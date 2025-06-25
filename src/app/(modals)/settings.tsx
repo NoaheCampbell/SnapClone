@@ -370,6 +370,14 @@ export default function SettingsModal() {
             <Text className="text-red-500 text-base font-medium ml-3">Sign Out</Text>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}
+          onPress={() => router.push('/(modals)/testEdge')}
+        >
+          <Feather name="tool" size={20} color={Colors.light.tint} style={{ marginRight: 8 }} />
+          <Text style={{ fontSize: 16 }}>Developer Tools</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );

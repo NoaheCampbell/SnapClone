@@ -55,7 +55,7 @@ export default function CameraScreen() {
 
   // Store captured uri from onLoadEnd capture
   const captureResultRef = useRef<string | undefined>(undefined);
-  
+
   // Track currently editing text for saving on background tap
   const currentEditingTextRef = useRef<{ id: string; text: string } | null>(null);
 
@@ -138,10 +138,10 @@ export default function CameraScreen() {
       currentEditingTextRef.current = null;
     } else {
       console.log('No editing text to save');
-      setTextOverlays(textOverlays.map(text => ({
-        ...text,
-        isEditing: false
-      })));
+    setTextOverlays(textOverlays.map(text => ({
+      ...text,
+      isEditing: false
+    })));
     }
     setSelectedTextId(null);
   };
@@ -282,12 +282,12 @@ export default function CameraScreen() {
         if ((captureResultRef.current)) {
           finalUri = captureResultRef.current;
           captureResultRef.current = undefined;
-        }
-        
-        // Store finalUri and show post options modal
-        setCapturedPhoto(finalUri);
-        setPhotoLoaded(true);
-        setPostOptionsVisible(true);
+      }
+
+      // Store finalUri and show post options modal
+      setCapturedPhoto(finalUri);
+      setPhotoLoaded(true);
+      setPostOptionsVisible(true);
       } else {
         // No filter or text overlays - just show the original photo
         setCapturedPhoto(finalUri);
@@ -556,9 +556,9 @@ export default function CameraScreen() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
           <GestureDetector gesture={backgroundTapGesture}>
-            <View 
-              style={{ flex: 1 }} 
-            >
+          <View 
+            style={{ flex: 1 }} 
+          >
             {capturedPhoto ? (
               <View style={{ flex: 1 }}>
                 {selectedFilter.component ? (
