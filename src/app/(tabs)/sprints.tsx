@@ -657,9 +657,9 @@ Return the response in this exact JSON format:
   useEffect(() => {
     loadData();
     
-    // Set up real-time updates for sprints
+    // Set up real-time updates for sprints, circles, and circle membership
     const subscription = supabase
-      .channel('sprints-updates')
+      .channel('sprints-and-circles-updates')
       .on(
         'postgres_changes',
         {
@@ -668,6 +668,37 @@ Return the response in this exact JSON format:
           table: 'sprints'
         },
         () => {
+          console.log('Sprints table changed, reloading data...');
+          loadData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'circle_members'
+        },
+        (payload) => {
+          console.log('Circle membership changed:', payload);
+          // Only reload if the change affects the current user
+          const newRecord = payload.new as any;
+          const oldRecord = payload.old as any;
+          if (newRecord?.user_id === user?.id || oldRecord?.user_id === user?.id) {
+            console.log('Current user affected, reloading data...');
+            loadData();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'circles'
+        },
+        () => {
+          console.log('Circles table changed, reloading data...');
           loadData();
         }
       )

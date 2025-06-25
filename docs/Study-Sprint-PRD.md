@@ -33,10 +33,15 @@ SnapStudy is a mobile, Snapchat‑style accountability app for study‑sprint ci
 	•	Ephemeral Reel – most‑recent active snap per member; disappears at ends_at
 	•	Auto‑Purge – Cron every 30 min deletes expired rows/media
 
-3.2  AI Helpers (included in v0)
-	1.	OCR → Summary
-	2.	Concept‑Map PNG
-	3.	MCQ Quiz Generator (stores score per sprint)
+3.2  AI Helpers (RAG)
+
+	Embed new summary → store 1536-dim vector in summaries.embed.
+
+	Gap-aware quiz → retrieve last 10 summaries with the same tag (k-NN via pgvector); ask GPT-4o for 5 MCQs that include at least one previously missed concept.
+
+	Concept map → reuse those retrieved chunks to build a Mermaid diagram PNG.
+
+	Next-topic suggestion → supply summaries + streak stats; GPT returns { topic, reason }.
 
 3.3  Gamified Streak System
 	•	Individual streak + freeze token
