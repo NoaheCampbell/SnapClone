@@ -70,16 +70,10 @@ yarn install
 
 #### Configure Database
 1. In your Supabase dashboard, go to the SQL Editor
-2. Run the migration files in order from the `supabase/migrations/` folder:
-   - `20240610120000_initial_schema.sql`
-   - `20250101120000_create_message_reads.sql`
-   - `20250101130000_add_privacy_settings.sql`
-   - `20250101150000_enable_message_reads_realtime.sql`
-   - `20250624043841_create_get_user_chats_function.sql`
-   - `20250624060000_update_stories_schema.sql`
-   - `20250624060500_update_stories_policy.sql`
-   - `20250624061000_storage_policy_stories.sql`
-
+2. **Option A**: Run the complete schema migration file:
+   - `20250101200000_create_complete_schema.sql`
+   - This creates all tables, indexes, RLS policies, and functions in one go
+   
 #### Configure Authentication
 1. In Supabase dashboard, go to Authentication → Providers
 2. **Important**: Turn OFF "Confirm email" for the Email provider
