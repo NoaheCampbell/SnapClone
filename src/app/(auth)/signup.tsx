@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Image } from 'react-native'
 import React, { useState } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -37,17 +37,8 @@ export default function SignupScreen() {
     if (error) {
       Alert.alert('Signup Failed', error.message)
     } else {
-      // Skip email confirmation and go directly to profile creation
-      Alert.alert(
-        'Account Created!',
-        'Your account has been created successfully. Please create your profile.',
-        [
-          {
-            text: 'Continue',
-            onPress: () => router.replace('./create-profile' as any)
-          }
-        ]
-      )
+      // Go directly to profile creation without email confirmation
+      router.replace('./create-profile' as any)
     }
     setLoading(false)
   }
@@ -61,10 +52,12 @@ export default function SignupScreen() {
         <View className="flex-1 px-6 justify-center">
           {/* Header */}
           <View className="items-center mb-12">
-            <View className="w-20 h-20 bg-yellow-400 rounded-full items-center justify-center mb-6">
-              <Feather name="camera" size={32} color="black" />
-            </View>
-            <Text className="text-white text-3xl font-bold">Join SnapClone</Text>
+            <Image 
+              source={require('../../../assets/images/sprintloop.png')}
+              className="w-24 h-24 mb-6"
+              resizeMode="contain"
+            />
+            <Text className="text-white text-3xl font-bold">Join SprintLoop</Text>
             <Text className="text-gray-400 text-base mt-2">Create your account</Text>
           </View>
 

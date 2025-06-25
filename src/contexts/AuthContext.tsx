@@ -1,8 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { Session, User } from '@supabase/supabase-js'
-import * as Linking from 'expo-linking'
-// import * as AuthSession from 'expo-auth-session'
-// import * as WebBrowser from 'expo-web-browser'
 import { supabase } from '../../lib/supabase'
 
 // WebBrowser.maybeCompleteAuthSession()
@@ -28,7 +25,7 @@ interface AuthContextType {
   createProfile: (username: string, displayName?: string) => Promise<{ error: any }>
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: any }>
   refreshProfile: () => Promise<void>
-  resendConfirmation: (email: string) => Promise<{ error: any }>
+
   updateLastActive: () => Promise<void>
 }
 
@@ -43,38 +40,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const profileLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    // Handle deep links for email confirmation
-    const handleDeepLink = async (url: string) => {
-      // Parse the URL to extract tokens
-      if (url.includes('#access_token=')) {
-        const urlObj = new URL(url)
-        const hashParams = new URLSearchParams(urlObj.hash.substring(1))
-        const accessToken = hashParams.get('access_token')
-        const refreshToken = hashParams.get('refresh_token')
-        
-        if (accessToken && refreshToken) {
-          const { data, error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          })
-          if (error) {
-            console.error('Error setting session from deep link:', error)
-          }
-        }
-      }
-    }
-
-    // Listen for deep links
-    const linkingSubscription = Linking.addEventListener('url', ({ url }) => {
-      handleDeepLink(url)
-    })
-
-    // Check if app was opened with a deep link
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleDeepLink(url)
-      }
-    })
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session }, error }) => {
@@ -113,7 +78,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       subscription.unsubscribe()
-      linkingSubscription?.remove()
       if (profileLoadTimeoutRef.current) {
         clearTimeout(profileLoadTimeoutRef.current)
       }
@@ -196,18 +160,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Sign up without email verification
     const { data, error } = await supabase.auth.signUp({
       email,
-      password
-      // Removed options to use default settings - email confirmation should be disabled in Supabase dashboard
+      password,
+      options: {
+        emailRedirectTo: undefined, // Disable email confirmation
+        data: {
+          email_confirm: false // Additional flag to skip confirmation
+        }
+      }
     });
 
     if (!error && data.user) {
       setSession(data.session);
       setUser(data.user);
-    }
-    
-    // If signup successful and user is immediately confirmed (no email verification required)
-    if (!error && data.user && !data.user.email_confirmed_at) {
-      console.log('User created but not confirmed - this is expected when email confirmation is disabled')
     }
     
     return { error }
@@ -311,17 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const resendConfirmation = async (email: string) => {
-    // Use a simple redirect URL that works for development
-    const { data, error } = await supabase.auth.resend({
-      type: 'signup',
-      email: email,
-      options: {
-        emailRedirectTo: 'https://app.supabase.com'
-      }
-    })
-    return { error }
-  }
+
 
   const updateLastActive = async () => {
     // Temporarily disabled to prevent database errors
@@ -340,7 +294,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     createProfile,
     updateProfile,
     refreshProfile,
-    resendConfirmation,
     updateLastActive,
   }
 
