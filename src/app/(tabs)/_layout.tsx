@@ -22,12 +22,6 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
-        options={{
-          tabBarIcon: ({ color }) => <Feather name="camera" size={28} color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="friends"
         options={{
           tabBarIcon: ({ color }) => <Feather name="users" size={28} color={color} />,

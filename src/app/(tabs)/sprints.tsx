@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import SprintCamera from '../../components/SprintCamera';
 
 interface Sprint {
   id: string;
@@ -16,6 +17,7 @@ interface Sprint {
   started_at: string;
   ends_at: string;
   media_url?: string;
+  end_media_url?: string;
   circle_name: string;
   username: string;
   is_active: boolean;
@@ -43,6 +45,10 @@ export default function SprintsTab() {
   const [sprintDuration, setSprintDuration] = useState(25);
   const [customDuration, setCustomDuration] = useState('');
   const [creatingSprintLoading, setCreatingSprintLoading] = useState(false);
+  const [showStartCamera, setShowStartCamera] = useState(false);
+  const [showEndCamera, setShowEndCamera] = useState(false);
+  const [startPhotoUrl, setStartPhotoUrl] = useState<string>('');
+  const [endingSprintId, setEndingSprintId] = useState<string>('');
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -60,6 +66,7 @@ export default function SprintsTab() {
           started_at,
           ends_at,
           media_url,
+          end_media_url,
           circles!inner(name),
           profiles!inner(username)
         `)
@@ -91,6 +98,7 @@ export default function SprintsTab() {
           started_at: sprint.started_at,
           ends_at: sprint.ends_at,
           media_url: sprint.media_url,
+          end_media_url: sprint.end_media_url,
           circle_name: sprint.circles.name,
           username: sprint.profiles.username,
           is_active: timeRemaining > 0,
@@ -147,74 +155,135 @@ export default function SprintsTab() {
   const endSprint = async (sprintId: string, topic: string) => {
     Alert.alert(
       'End Sprint',
-      `Are you sure you want to end your "${topic}" sprint early?`,
+      `Take a completion photo for your "${topic}" sprint?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'End Sprint', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) return;
-
-              // Get sprint details first
-              const { data: sprint } = await supabase
-                .from('sprints')
-                .select('circle_id')
-                .eq('id', sprintId)
-                .single();
-
-              // Update sprint to end now
-              const { error } = await supabase
-                .from('sprints')
-                .update({ ends_at: new Date().toISOString() })
-                .eq('id', sprintId);
-
-              if (error) throw error;
-
-              // Send a system message about ending the sprint early
-              if (sprint?.circle_id) {
-                const { data: profile } = await supabase
-                  .from('profiles')
-                  .select('username')
-                  .eq('user_id', user.id)
-                  .single();
-
-                const username = profile?.username || 'Someone';
-                const { error: messageError } = await supabase
-                  .from('messages')
-                  .insert({
-                    circle_id: sprint.circle_id,
-                    sender_id: user.id,
-                    content: `⏹️ ${username} ended their "${topic}" sprint early`
-                  });
-
-                if (messageError) console.error('Error sending sprint end notification:', messageError);
-              }
-
-              Alert.alert('Sprint Ended', 'Your sprint has been completed!');
-              loadData(); // Refresh the data
-            } catch (error) {
-              console.error('Error ending sprint:', error);
-              Alert.alert('Error', 'Failed to end sprint. Please try again.');
-            }
+          text: 'Skip Photo', 
+          style: 'default',
+          onPress: () => completeSprintWithoutPhoto(sprintId, topic)
+        },
+        { 
+          text: 'Take Photo', 
+          style: 'default',
+          onPress: () => {
+            setEndingSprintId(sprintId);
+            setShowEndCamera(true);
           }
         }
       ]
     );
   };
 
-  const openSprintModal = (circleId: string) => {
-    setSelectedCircleId(circleId);
-    setSprintTopic('');
-    setSprintGoals('');
-    setSprintDuration(25);
-    setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
-    setShowSprintModal(true);
+  const completeSprintWithoutPhoto = async (sprintId: string, topic: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Get sprint details first
+      const { data: sprint } = await supabase
+        .from('sprints')
+        .select('circle_id')
+        .eq('id', sprintId)
+        .single();
+
+      // Update sprint to end now
+      const { error } = await supabase
+        .from('sprints')
+        .update({ ends_at: new Date().toISOString() })
+        .eq('id', sprintId);
+
+      if (error) throw error;
+
+      // Send a system message about ending the sprint early
+      if (sprint?.circle_id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('user_id', user.id)
+          .single();
+
+        const username = profile?.username || 'Someone';
+        const { error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            circle_id: sprint.circle_id,
+            sender_id: user.id,
+            content: `⏹️ ${username} ended their "${topic}" sprint early`
+          });
+
+        if (messageError) console.error('Error sending sprint end notification:', messageError);
+      }
+
+      Alert.alert('Sprint Ended', 'Your sprint has been completed!');
+      loadData(); // Refresh the data
+    } catch (error) {
+      console.error('Error ending sprint:', error);
+      Alert.alert('Error', 'Failed to end sprint. Please try again.');
+    }
   };
 
-  const createSprint = async () => {
+  const completeSprintWithPhoto = async (photoUrl: string) => {
+    if (!endingSprintId) return;
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Get sprint details first
+      const { data: sprint } = await supabase
+        .from('sprints')
+        .select('circle_id, topic')
+        .eq('id', endingSprintId)
+        .single();
+
+      // Update sprint to end now and add completion photo
+      const { error } = await supabase
+        .from('sprints')
+        .update({ 
+          ends_at: new Date().toISOString(),
+          end_media_url: photoUrl
+        })
+        .eq('id', endingSprintId);
+
+      if (error) throw error;
+
+      // Send a system message about ending the sprint with photo
+      if (sprint?.circle_id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('user_id', user.id)
+          .single();
+
+        const username = profile?.username || 'Someone';
+        const { error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            circle_id: sprint.circle_id,
+            sender_id: user.id,
+            content: `🏁 ${username} completed their "${sprint.topic}" sprint!`
+          });
+
+        if (messageError) console.error('Error sending sprint completion notification:', messageError);
+      }
+
+      setEndingSprintId('');
+      Alert.alert('Sprint Completed!', 'Your sprint has been completed with a photo!');
+      loadData(); // Refresh the data
+    } catch (error) {
+      console.error('Error completing sprint:', error);
+      Alert.alert('Error', 'Failed to complete sprint. Please try again.');
+    }
+  };
+
+  const handleStartPhoto = (photoUrl: string) => {
+    setStartPhotoUrl(photoUrl);
+    // Continue with sprint creation
+    createSprintWithPhoto(photoUrl);
+  };
+
+  const createSprintWithPhoto = async (photoUrl: string) => {
     if (!sprintTopic.trim() || creatingSprintLoading) return;
     
     // Validate duration
@@ -229,7 +298,7 @@ export default function SprintsTab() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Create sprint directly in database
+      // Create sprint directly in database with photo
       const endsAt = new Date(Date.now() + duration * 60 * 1000);
 
       const { data: sprint, error: sprintError } = await supabase
@@ -238,9 +307,9 @@ export default function SprintsTab() {
           circle_id: selectedCircleId,
           user_id: user.id,
           topic: sprintTopic.trim(),
-          // goals: sprintGoals.trim() || null, // Will add back when column exists
           tags: [],
-          ends_at: endsAt.toISOString()
+          ends_at: endsAt.toISOString(),
+          media_url: photoUrl
         })
         .select()
         .single();
@@ -266,6 +335,7 @@ export default function SprintsTab() {
       if (messageError) console.error('Error sending sprint notification:', messageError);
 
       setShowSprintModal(false);
+      setStartPhotoUrl('');
       Alert.alert('Sprint Started!', `Your ${sprintTopic} sprint has begun. Good luck!`);
       loadData(); // Refresh the data
     } catch (error) {
@@ -274,6 +344,30 @@ export default function SprintsTab() {
     } finally {
       setCreatingSprintLoading(false);
     }
+  };
+
+  const openSprintModal = (circleId: string) => {
+    setSelectedCircleId(circleId);
+    setSprintTopic('');
+    setSprintGoals('');
+    setSprintDuration(25);
+    setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
+    setShowSprintModal(true);
+  };
+
+  const createSprint = async () => {
+    if (!sprintTopic.trim() || creatingSprintLoading) return;
+    
+    // Validate duration
+    const duration = parseInt(customDuration);
+    if (isNaN(duration) || duration < 1 || duration > 180) {
+      Alert.alert('Invalid Duration', 'Please enter a duration between 1 and 180 minutes.');
+      return;
+    }
+    
+    // Show camera to take start photo
+    setShowSprintModal(false);
+    setShowStartCamera(true);
   };
 
   useEffect(() => {
@@ -325,6 +419,34 @@ export default function SprintsTab() {
             <Text className="text-gray-400 text-sm">{item.username} • {item.circle_name}</Text>
             {item.goals && (
               <Text className="text-gray-300 text-sm mt-1">Goals: {item.goals}</Text>
+            )}
+          </View>
+          
+          {/* Sprint Photos */}
+          <View className="flex-row space-x-2">
+            {item.media_url && (
+              <View className="relative">
+                <Image 
+                  source={{ uri: item.media_url }} 
+                  className="w-16 h-16 rounded-lg"
+                  resizeMode="cover"
+                />
+                <View className="absolute bottom-0 left-0 right-0 bg-black/60 rounded-b-lg px-1 py-0.5">
+                  <Text className="text-white text-xs text-center">Start</Text>
+                </View>
+              </View>
+            )}
+            {item.end_media_url && (
+              <View className="relative">
+                <Image 
+                  source={{ uri: item.end_media_url }} 
+                  className="w-16 h-16 rounded-lg"
+                  resizeMode="cover"
+                />
+                <View className="absolute bottom-0 left-0 right-0 bg-black/60 rounded-b-lg px-1 py-0.5">
+                  <Text className="text-white text-xs text-center">End</Text>
+                </View>
+              </View>
             )}
           </View>
           {isStillActive && (
@@ -567,6 +689,32 @@ export default function SprintsTab() {
           </View>
         </SafeAreaView>
       </Modal>
+
+      {/* Sprint Start Camera */}
+      {showStartCamera && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }}>
+          <SprintCamera
+            onCapture={handleStartPhoto}
+            onCancel={() => {
+              setShowStartCamera(false);
+              setShowSprintModal(true); // Go back to sprint modal
+            }}
+          />
+        </View>
+      )}
+
+      {/* Sprint End Camera */}
+      {showEndCamera && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }}>
+          <SprintCamera
+            onCapture={completeSprintWithPhoto}
+            onCancel={() => {
+              setShowEndCamera(false);
+              setEndingSprintId('');
+            }}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 } 
