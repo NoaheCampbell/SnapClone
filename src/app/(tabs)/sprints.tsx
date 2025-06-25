@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
@@ -16,6 +17,7 @@ interface Sprint {
   user_id: string;
   topic: string;
   goals?: string;
+  quiz_question_count?: number;
   tags: string[];
   started_at: string;
   ends_at: string;
@@ -46,6 +48,7 @@ export default function SprintsTab() {
   const [sprintGoals, setSprintGoals] = useState('');
   const [sprintDuration, setSprintDuration] = useState(25);
   const [customDuration, setCustomDuration] = useState('');
+  const [quizQuestionCount, setQuizQuestionCount] = useState(3);
   const [creatingSprintLoading, setCreatingSprintLoading] = useState(false);
   const [showStartCamera, setShowStartCamera] = useState(false);
   const [showEndCamera, setShowEndCamera] = useState(false);
@@ -54,8 +57,10 @@ export default function SprintsTab() {
   const [showQuizModal, setShowQuizModal] = useState(false);
   const [quizSprintId, setQuizSprintId] = useState<string>('');
   const [quizSprintTopic, setQuizSprintTopic] = useState<string>('');
+  const [quizSprintGoals, setQuizSprintGoals] = useState<string>('');
   const [quizCircleId, setQuizCircleId] = useState<string>('');
   const [quizSprintDuration, setQuizSprintDuration] = useState<number>(25);
+  const [selectedQuizQuestionCount, setSelectedQuizQuestionCount] = useState<number>(3);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completionSprintTopic, setCompletionSprintTopic] = useState<string>('');
   const [completionSprintDuration, setCompletionSprintDuration] = useState<number>(25);
@@ -73,6 +78,8 @@ export default function SprintsTab() {
           circle_id,
           user_id,
           topic,
+          goals,
+          quiz_question_count,
           tags,
           started_at,
           ends_at,
@@ -104,7 +111,8 @@ export default function SprintsTab() {
           circle_id: sprint.circle_id,
           user_id: sprint.user_id,
           topic: sprint.topic,
-          goals: undefined, // Will add back when column exists
+          goals: sprint.goals,
+          quiz_question_count: sprint.quiz_question_count,
           tags: sprint.tags || [],
           started_at: sprint.started_at,
           ends_at: sprint.ends_at,
@@ -252,7 +260,7 @@ export default function SprintsTab() {
       // Get sprint details first
       const { data: sprint } = await supabase
         .from('sprints')
-        .select('circle_id, started_at, ends_at')
+        .select('circle_id, goals, quiz_question_count, started_at, ends_at')
         .eq('id', sprintId)
         .single();
 
@@ -293,8 +301,10 @@ export default function SprintsTab() {
         setCompletionSprintDuration(duration);
         setQuizSprintId(sprintId);
         setQuizSprintTopic(topic);
+        setQuizSprintGoals(sprint.goals || 'General study goals');
         setQuizCircleId(sprint.circle_id);
         setQuizSprintDuration(duration);
+        setSelectedQuizQuestionCount(sprint.quiz_question_count || 3);
         setShowCompletionModal(true);
       }
       
@@ -317,7 +327,7 @@ export default function SprintsTab() {
       // Get sprint details first
       const { data: sprint } = await supabase
         .from('sprints')
-        .select('circle_id, topic, started_at, ends_at')
+        .select('circle_id, topic, goals, quiz_question_count, started_at, ends_at')
         .eq('id', endingSprintId)
         .single();
 
@@ -363,8 +373,10 @@ export default function SprintsTab() {
         setCompletionSprintDuration(duration);
         setQuizSprintId(endingSprintId);
         setQuizSprintTopic(sprint.topic || 'Study Sprint');
+        setQuizSprintGoals(sprint.goals || 'General study goals');
         setQuizCircleId(sprint.circle_id);
         setQuizSprintDuration(duration);
+        setSelectedQuizQuestionCount(sprint.quiz_question_count || 3);
         setShowCompletionModal(true);
       }
       
@@ -406,6 +418,8 @@ export default function SprintsTab() {
           circle_id: selectedCircleId,
           user_id: user.id,
           topic: sprintTopic.trim(),
+          goals: sprintGoals.trim(),
+          quiz_question_count: quizQuestionCount,
           tags: [],
           ends_at: endsAt.toISOString(),
           media_url: photoUrl
@@ -454,11 +468,17 @@ export default function SprintsTab() {
     setSprintGoals('');
     setSprintDuration(25);
     setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
+    setQuizQuestionCount(3); // Default to 3 questions
     setShowSprintModal(true);
   };
 
   const createSprint = async () => {
     if (!sprintTopic.trim() || creatingSprintLoading) return;
+    
+    if (!sprintGoals.trim()) {
+      Alert.alert('Missing Goals', 'Please enter your study goals to help generate better quiz questions.');
+      return;
+    }
     
     // Validate duration
     const duration = parseInt(customDuration);
@@ -758,16 +778,17 @@ export default function SprintsTab() {
                 setSprintTopic('');
                 setSprintGoals('');
                 setCustomDuration('25');
+                setQuizQuestionCount(3);
               }}>
                 <Text className="text-blue-400 text-lg">Cancel</Text>
               </TouchableOpacity>
               <Text className="text-white text-lg font-semibold">New Sprint</Text>
               <TouchableOpacity 
                 onPress={createSprint}
-                disabled={!sprintTopic.trim() || creatingSprintLoading || !customDuration || parseInt(customDuration) < 1 || parseInt(customDuration) > 180}
+                disabled={!sprintTopic.trim() || !sprintGoals.trim() || creatingSprintLoading || !customDuration || parseInt(customDuration) < 1 || parseInt(customDuration) > 180}
               >
                 <Text className={`text-lg font-semibold ${
-                  sprintTopic.trim() && !creatingSprintLoading && customDuration && parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 ? 'text-blue-400' : 'text-gray-600'
+                  sprintTopic.trim() && sprintGoals.trim() && !creatingSprintLoading && customDuration && parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 ? 'text-blue-400' : 'text-gray-600'
                 }`}>
                   {creatingSprintLoading ? 'Creating...' : 'Start'}
                 </Text>
@@ -791,7 +812,7 @@ export default function SprintsTab() {
 
               {/* Goals */}
               <View className="mb-6">
-                <Text className="text-white text-lg font-semibold mb-2">Goals (optional)</Text>
+                <Text className="text-white text-lg font-semibold mb-2">Goals</Text>
                 <TextInput
                   value={sprintGoals}
                   onChangeText={setSprintGoals}
@@ -802,6 +823,9 @@ export default function SprintsTab() {
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
+                <Text className="text-gray-400 text-xs mt-1">
+                  Goals help generate better quiz questions
+                </Text>
               </View>
 
               {/* Duration */}
@@ -833,6 +857,35 @@ export default function SprintsTab() {
                     }
                   </Text>
                 )}
+              </View>
+
+              {/* Quiz Questions */}
+              <View className="mb-6">
+                <Text className="text-white text-lg font-semibold mb-2">Quiz Questions</Text>
+                <Text className="text-gray-400 text-sm mb-3">How many questions should be in your quiz?</Text>
+                
+                <View className="mb-4">
+                  <Slider
+                    style={{ width: '100%', height: 40 }}
+                    minimumValue={3}
+                    maximumValue={10}
+                    step={1}
+                    value={quizQuestionCount}
+                    onValueChange={setQuizQuestionCount}
+                    minimumTrackTintColor="#3B82F6"
+                    maximumTrackTintColor="#4B5563"
+                    thumbTintColor="#3B82F6"
+                  />
+                  
+                  <View className="flex-row justify-between px-1">
+                    <Text className="text-gray-500 text-xs">3</Text>
+                    <Text className="text-gray-500 text-xs">10</Text>
+                  </View>
+                </View>
+                
+                <Text className="text-gray-400 text-center text-sm">
+                  {quizQuestionCount} question{quizQuestionCount !== 1 ? 's' : ''}
+                </Text>
               </View>
             </View>
           </View>
@@ -882,8 +935,10 @@ export default function SprintsTab() {
         onClose={() => setShowQuizModal(false)}
         sprintId={quizSprintId}
         sprintTopic={quizSprintTopic}
+        sprintGoals={quizSprintGoals}
         circleId={quizCircleId}
         sprintDuration={quizSprintDuration}
+        questionCount={selectedQuizQuestionCount}
       />
     </SafeAreaView>
     </GestureHandlerRootView>

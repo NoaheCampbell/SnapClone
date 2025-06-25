@@ -30,11 +30,13 @@ interface QuizModalProps {
   onClose: () => void;
   sprintId: string;
   sprintTopic: string;
+  sprintGoals: string;
   circleId: string;
   sprintDuration: number; // in minutes
+  questionCount?: number; // number of questions to generate
 }
 
-export default function QuizModal({ visible, onClose, sprintId, sprintTopic, circleId, sprintDuration }: QuizModalProps) {
+export default function QuizModal({ visible, onClose, sprintId, sprintTopic, sprintGoals, circleId, sprintDuration, questionCount = 3 }: QuizModalProps) {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -124,48 +126,169 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, cir
     }
   };
 
-  const generateSampleQuiz = async () => {
-    // Sample quiz based on sprint topic
-    const sampleQuiz = {
-      id: sprintId,
-      mcq_json: {
-        questions: [
-          {
-            question: `What was the main topic of your "${sprintTopic}" study sprint?`,
-            options: [
-              sprintTopic,
-              "Something else",
-              "I don't remember",
-              "Multiple topics"
-            ],
-            correct_answer: 0
-          },
-          {
-            question: "How would you rate your focus during this sprint?",
-            options: [
-              "Excellent - stayed focused the whole time",
-              "Good - mostly focused with minor distractions", 
-              "Fair - some focus but got distracted",
-              "Poor - struggled to stay focused"
-            ],
-            correct_answer: 0
-          },
-          {
-            question: "What's the most important thing you learned?",
-            options: [
-              "New concepts related to the topic",
-              "Better study techniques",
-              "Time management skills",
-              "The importance of focused study time"
-            ],
-            correct_answer: 0
-          }
-        ]
+  const generateQuizWithChatGPT = async () => {
+    try {
+      // Call ChatGPT API to generate quiz questions
+      const prompt = `Generate a quiz with exactly ${questionCount} multiple choice questions based on this study sprint:
+
+Topic: ${sprintTopic}
+Goals: ${sprintGoals}
+
+The questions should test understanding of the topic and achievement of the stated goals. Each question should have 4 options with one correct answer.
+
+Return the response in this exact JSON format:
+{
+  "questions": [
+    {
+      "question": "Question text here?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": 0
+    }
+  ]
+}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant that generates educational quiz questions. Always respond with valid JSON only.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.7
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.status}`);
       }
-    };
-    
-    setQuiz(sampleQuiz);
-    setUserAnswers(new Array(sampleQuiz.mcq_json.questions.length).fill(-1));
+
+      const data = await response.json();
+      const quizContent = JSON.parse(data.choices[0].message.content);
+      
+      return quizContent;
+    } catch (error) {
+      console.error('Error generating quiz with ChatGPT:', error);
+      return null;
+    }
+  };
+
+  const generateSampleQuiz = async () => {
+    try {
+      // First create a summary for this sprint if it doesn't exist
+      const { data: existingSummary } = await supabase
+        .from('summaries')
+        .select('id')
+        .eq('sprint_id', sprintId)
+        .single();
+
+      let summaryId = existingSummary?.id;
+
+      if (!summaryId) {
+        // Create a summary
+        const { data: newSummary, error: summaryError } = await supabase
+          .from('summaries')
+          .insert({
+            sprint_id: sprintId,
+            bullets: [`Studied ${sprintTopic}`, "Focused learning session", "Knowledge consolidation"],
+            concept_map_url: null
+          })
+          .select('id')
+          .single();
+
+        if (summaryError) throw summaryError;
+        summaryId = newSummary.id;
+      }
+
+      // Try to generate quiz with ChatGPT first
+      let quizData = await generateQuizWithChatGPT();
+      
+      // Fall back to sample quiz if ChatGPT fails
+      if (!quizData) {
+        quizData = {
+          questions: [
+            {
+              question: `What was the main topic of your "${sprintTopic}" study sprint?`,
+              options: [
+                sprintTopic,
+                "Something else",
+                "I don't remember",
+                "Multiple topics"
+              ],
+              correct_answer: 0
+            },
+            {
+              question: `Did you achieve your goal: "${sprintGoals}"?`,
+              options: [
+                "Yes, completely achieved it",
+                "Mostly achieved it",
+                "Partially achieved it",
+                "No, didn't achieve it"
+              ],
+              correct_answer: 0
+            },
+            {
+              question: "What's the most important thing you learned during this sprint?",
+              options: [
+                "New concepts related to the topic",
+                "Better study techniques",
+                "Time management skills",
+                "The importance of focused study time"
+              ],
+              correct_answer: 0
+            }
+          ]
+        };
+      }
+
+      // Create the quiz in the database
+      const { data: newQuiz, error: quizError } = await supabase
+        .from('quizzes')
+        .insert({
+          summary_id: summaryId,
+          mcq_json: quizData
+        })
+        .select('id, mcq_json')
+        .single();
+
+      if (quizError) throw quizError;
+
+      setQuiz(newQuiz);
+      setUserAnswers(new Array(quizData.questions.length).fill(-1));
+    } catch (error) {
+      console.error('Error generating quiz:', error);
+      // Fallback to simple quiz without database storage
+      const fallbackQuiz = {
+        id: `temp_${sprintId}`,
+        mcq_json: {
+          questions: [
+            {
+              question: "How did your study sprint go?",
+              options: [
+                "Very well - I stayed focused",
+                "Good - mostly productive",
+                "Okay - some distractions",
+                "Could have been better"
+              ],
+              correct_answer: 0
+            }
+          ]
+        }
+      };
+      setQuiz(fallbackQuiz);
+      setUserAnswers([]);
+    }
   };
 
   const selectAnswer = (questionIndex: number, answerIndex: number) => {
@@ -211,17 +334,19 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, cir
       const finalScore = Math.round((correctAnswers / quiz.mcq_json.questions.length) * 100);
       setScore(finalScore);
 
-      // Save quiz attempt
-      const { error } = await supabase
-        .from('quiz_attempts')
-        .insert({
-          quiz_id: quiz.id,
-          user_id: user.id,
-          score: finalScore,
-          answers: userAnswers
-        });
+      // Save quiz attempt (only if quiz has a real database ID)
+      if (!quiz.id.startsWith('temp_')) {
+        const { error } = await supabase
+          .from('quiz_attempts')
+          .insert({
+            quiz_id: quiz.id,
+            user_id: user.id,
+            score: finalScore,
+            answers: userAnswers
+          });
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       // Send notification to circle about quiz completion
       const { data: profile } = await supabase
@@ -275,9 +400,9 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, cir
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']}>
+      <SafeAreaView className="flex-1 bg-black" edges={['top', 'left', 'right']} style={{ flex: 1 }}>
         {/* Header */}
-        <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
+        <View className="flex-row justify-between items-center p-4 border-b border-gray-800" style={{ paddingTop: 16 }}>
           <Text className="text-white text-xl font-bold">Sprint Quiz</Text>
           {!showResults && !hasAlreadyTaken && timeRemaining > 0 && (
             <View className={`px-3 py-1 rounded-full ${timeRemaining < 60 ? 'bg-red-500' : timeRemaining < 120 ? 'bg-yellow-500' : 'bg-blue-500'}`}>
