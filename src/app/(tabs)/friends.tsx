@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity, Alert, Image, Modal, TextInput } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert, Image, Modal, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -32,6 +32,15 @@ interface FriendRequest {
   from_profile: Profile
 }
 
+interface CircleSuggestion {
+  id: string
+  name: string
+  member_count: number
+  recent_activity: number
+  score: number
+  similarity_reason: string
+}
+
 export default function FriendsScreen() {
   const { user } = useAuth()
   const [friends, setFriends] = useState<Friend[]>([])
@@ -41,13 +50,19 @@ export default function FriendsScreen() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Profile[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [circleSuggestions, setCircleSuggestions] = useState<CircleSuggestion[]>([])
+  const [loadingCircleSuggestions, setLoadingCircleSuggestions] = useState(false)
+  const [activeTab, setActiveTab] = useState<'friends' | 'circles'>('friends')
 
   useEffect(() => {
     if (user) {
       loadFriends()
       loadFriendRequests()
+      if (activeTab === 'circles') {
+        loadCircleSuggestions()
+      }
     }
-  }, [user])
+  }, [user, activeTab])
 
   const loadFriends = async () => {
     if (!user) return
@@ -94,6 +109,37 @@ export default function FriendsScreen() {
       }
     } catch (error) {
       console.error('Error loading friend requests:', error)
+    }
+  }
+
+  const loadCircleSuggestions = async () => {
+    if (!user || loadingCircleSuggestions) return
+
+    setLoadingCircleSuggestions(true)
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateCircleSuggestions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          userId: user.id
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setCircleSuggestions(result.suggestions || [])
+      } else {
+        console.error('Failed to load circle suggestions')
+        setCircleSuggestions([])
+      }
+    } catch (error) {
+      console.error('Error loading circle suggestions:', error)
+      setCircleSuggestions([])
+    } finally {
+      setLoadingCircleSuggestions(false)
     }
   }
 
@@ -279,6 +325,35 @@ export default function FriendsScreen() {
     )
   }
 
+  const joinCircle = async (circleId: string) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase
+        .from('circle_members')
+        .insert({
+          circle_id: circleId,
+          user_id: user.id,
+          role: 'member'
+        })
+
+      if (error) {
+        if (error.message.includes('duplicate key')) {
+          Alert.alert('Already a Member', 'You are already a member of this circle.')
+        } else {
+          Alert.alert('Error', 'Failed to join circle. Please try again.')
+        }
+      } else {
+        Alert.alert('Success', 'Successfully joined the circle!')
+        // Remove the suggestion from the list
+        setCircleSuggestions(prev => prev.filter(s => s.id !== circleId))
+      }
+    } catch (error) {
+      console.error('Error joining circle:', error)
+      Alert.alert('Error', 'Failed to join circle. Please try again.')
+    }
+  }
+
   const renderFriend = ({ item }: { item: Friend }) => (
     <View className="mx-6 mb-4 bg-gray-800/50 rounded-2xl p-4 flex-row items-center">
       <View className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mr-4">
@@ -389,16 +464,54 @@ export default function FriendsScreen() {
     </View>
   )
 
+  const renderCircleSuggestion = ({ item }: { item: CircleSuggestion }) => (
+    <View className="mx-6 mb-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl p-4">
+      <View className="flex-row items-start justify-between mb-3">
+        <View className="flex-1">
+          <Text className="text-white text-lg font-bold mb-1">{item.name}</Text>
+          <Text className="text-purple-400 text-sm mb-2">{item.similarity_reason}</Text>
+          <View className="flex-row items-center space-x-4">
+            <View className="flex-row items-center">
+              <Feather name="users" size={12} color="#9CA3AF" />
+              <Text className="text-gray-400 text-xs ml-1">
+                {item.member_count} members
+              </Text>
+            </View>
+            <View className="flex-row items-center">
+              <Feather name="activity" size={12} color="#9CA3AF" />
+              <Text className="text-gray-400 text-xs ml-1">
+                {item.recent_activity} recent sprints
+              </Text>
+            </View>
+          </View>
+        </View>
+        <TouchableOpacity
+          onPress={() => joinCircle(item.id)}
+          className="bg-purple-600 rounded-lg px-4 py-2 ml-3"
+        >
+          <Text className="text-white text-sm font-medium">Join</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+
   return (
     <SafeAreaView className="flex-1 bg-black">
       {/* Header */}
       <View className="px-6 py-4 flex-row items-center justify-between">
         <View>
-          <Text className="text-white text-3xl font-bold">Friends</Text>
-          <Text className="text-gray-400 text-sm">{friends.length} friends</Text>
+          <Text className="text-white text-3xl font-bold">
+            {activeTab === 'friends' ? 'Friends' : 'Discover Circles'}
+          </Text>
+          <Text className="text-gray-400 text-sm">
+            {activeTab === 'friends' 
+              ? `${friends.length} friends` 
+              : 'Find study groups based on your interests'
+            }
+          </Text>
         </View>
         <View className="flex-row space-x-3">
-          {friendRequests.length > 0 && (
+          {activeTab === 'friends' && friendRequests.length > 0 && (
             <View className="relative">
               <View className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full items-center justify-center z-10">
                 <Text className="text-white text-xs font-bold">{friendRequests.length}</Text>
@@ -411,39 +524,129 @@ export default function FriendsScreen() {
               </TouchableOpacity>
             </View>
           )}
-          <TouchableOpacity 
-            onPress={() => setShowSearchModal(true)}
-            className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
+          {activeTab === 'friends' && (
+            <TouchableOpacity 
+              onPress={() => setShowSearchModal(true)}
+              className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
+            >
+              <Feather name="search" size={20} color="white" />
+            </TouchableOpacity>
+          )}
+          {activeTab === 'circles' && (
+            <TouchableOpacity 
+              onPress={loadCircleSuggestions}
+              disabled={loadingCircleSuggestions}
+              className="w-12 h-12 bg-purple-500 rounded-full items-center justify-center"
+            >
+              <Feather 
+                name={loadingCircleSuggestions ? "loader" : "refresh-cw"} 
+                size={20} 
+                color="white" 
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Tab Navigation */}
+      <View className="px-6 mb-4">
+        <View className="flex-row bg-gray-900 rounded-xl p-1">
+          <TouchableOpacity
+            onPress={() => setActiveTab('friends')}
+            className={`flex-1 py-3 px-4 rounded-lg ${
+              activeTab === 'friends' ? 'bg-blue-500' : 'bg-transparent'
+            }`}
           >
-            <Feather name="search" size={20} color="white" />
+            <Text className={`text-center font-semibold ${
+              activeTab === 'friends' ? 'text-white' : 'text-gray-400'
+            }`}>
+              Friends
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('circles')}
+            className={`flex-1 py-3 px-4 rounded-lg ${
+              activeTab === 'circles' ? 'bg-purple-500' : 'bg-transparent'
+            }`}
+          >
+            <Text className={`text-center font-semibold ${
+              activeTab === 'circles' ? 'text-white' : 'text-gray-400'
+            }`}>
+              Discover Circles
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Friends List */}
+      {/* Content Area */}
       <View className="flex-1">
-        {loading ? (
-          <View className="flex-1 items-center justify-center">
-            <Text className="text-white text-lg">Loading friends...</Text>
-          </View>
-        ) : friends.length === 0 ? (
-          <View className="flex-1 items-center justify-center px-8">
-            <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
-              <Feather name="users" size={60} color="white" />
+        {activeTab === 'friends' ? (
+          // Friends Tab
+          loading ? (
+            <View className="flex-1 items-center justify-center">
+              <Text className="text-white text-lg">Loading friends...</Text>
             </View>
-            <Text className="text-white text-2xl font-bold text-center mb-4">No Friends Yet</Text>
-            <Text className="text-gray-400 text-center text-lg">
-              Start connecting with people to build your friend network
-            </Text>
-          </View>
+          ) : friends.length === 0 ? (
+            <View className="flex-1 items-center justify-center px-8">
+              <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
+                <Feather name="users" size={60} color="white" />
+              </View>
+              <Text className="text-white text-2xl font-bold text-center mb-4">No Friends Yet</Text>
+              <Text className="text-gray-400 text-center text-lg">
+                Start connecting with people to build your friend network
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={friends}
+              renderItem={renderFriend}
+              keyExtractor={(item) => `${item.user_id}-${item.friend_id}`}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}
+            />
+          )
         ) : (
-          <FlatList
-            data={friends}
-            renderItem={renderFriend}
-            keyExtractor={(item) => `${item.user_id}-${item.friend_id}`}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}
-          />
+          // Circles Tab
+          loadingCircleSuggestions ? (
+            <View className="flex-1 items-center justify-center">
+              <ActivityIndicator size="large" color="#A855F7" />
+              <Text className="text-white text-lg mt-4">Finding circles for you...</Text>
+              <Text className="text-gray-400 text-sm mt-2 text-center px-8">
+                Using AI to match you with study groups based on your interests
+              </Text>
+            </View>
+          ) : circleSuggestions.length === 0 ? (
+            <View className="flex-1 items-center justify-center px-8">
+              <View className="w-32 h-32 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full items-center justify-center mb-8">
+                <Feather name="compass" size={60} color="white" />
+              </View>
+              <Text className="text-white text-2xl font-bold text-center mb-4">No Suggestions Yet</Text>
+              <Text className="text-gray-400 text-center text-lg mb-6">
+                Complete a few study sprints to get personalized circle recommendations
+              </Text>
+              <TouchableOpacity
+                onPress={loadCircleSuggestions}
+                className="bg-purple-500 px-6 py-3 rounded-xl"
+              >
+                <Text className="text-white font-semibold">Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View className="px-6 py-4">
+                <Text className="text-purple-400 text-sm mb-4">
+                  🎯 Based on your study history and interests
+                </Text>
+              </View>
+              <FlatList
+                data={circleSuggestions}
+                renderItem={renderCircleSuggestion}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+                contentContainerStyle={{ paddingBottom: 100 }}
+              />
+            </ScrollView>
+          )
         )}
       </View>
 

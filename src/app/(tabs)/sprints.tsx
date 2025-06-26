@@ -69,8 +69,7 @@ export default function SprintsTab() {
   const [showQuizResultsModal, setShowQuizResultsModal] = useState(false);
   const [resultsSprintId, setResultsSprintId] = useState<string>('');
   const [resultsSprintTopic, setResultsSprintTopic] = useState<string>('');
-  const [nextTopicSuggestion, setNextTopicSuggestion] = useState<any>(null);
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+
   const [showConceptMapModal, setShowConceptMapModal] = useState(false);
   const [conceptMapSprintId, setConceptMapSprintId] = useState<string>('');
   const [conceptMapSprintTopic, setConceptMapSprintTopic] = useState<string>('');
@@ -493,43 +492,7 @@ export default function SprintsTab() {
     setShowQuizResultsModal(true);
   };
 
-  const fetchNextTopicSuggestion = async () => {
-    if (!user || loadingSuggestion) return;
-    
-    setLoadingSuggestion(true);
-    try {
-      const suggestionResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateNextTopicSuggestion`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-          userId: user.id
-        })
-      });
 
-      if (suggestionResponse.ok) {
-        const result = await suggestionResponse.json();
-        setNextTopicSuggestion(result.suggestion);
-      } else {
-        console.error('Failed to generate topic suggestion');
-      }
-    } catch (error) {
-      console.error('Error fetching topic suggestion:', error);
-    } finally {
-      setLoadingSuggestion(false);
-    }
-  };
-
-  const useTopicSuggestion = () => {
-    if (nextTopicSuggestion) {
-      setSprintTopic(nextTopicSuggestion.topic);
-      setSprintGoals(`Study goal: ${nextTopicSuggestion.reason}`);
-      setCustomDuration(nextTopicSuggestion.estimated_duration.toString());
-      setNextTopicSuggestion(null); // Clear suggestion after use
-    }
-  };
 
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
     try {
@@ -1059,81 +1022,7 @@ Return the response in this exact JSON format:
         </View>
 
         {/* AI Topic Suggestion Section */}
-        <View className="border-t border-gray-800">
-          <View className="p-4 pb-2">
-            <View className="flex-row items-center justify-between">
-              <Text className="text-white text-lg font-semibold">AI Study Suggestion</Text>
-              <TouchableOpacity 
-                onPress={fetchNextTopicSuggestion}
-                disabled={loadingSuggestion}
-                className="flex-row items-center"
-              >
-                <Feather 
-                  name={loadingSuggestion ? "loader" : "refresh-cw"} 
-                  size={16} 
-                  color="#A78BFA" 
-                  style={{ marginRight: 4 }}
-                />
-                <Text className="text-purple-400 text-sm">
-                  {loadingSuggestion ? 'Generating...' : 'Get Suggestion'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          
-          {nextTopicSuggestion ? (
-            <View className="mx-4 mb-4 bg-gray-900 rounded-lg p-4 border border-purple-500/20">
-              <View className="flex-row items-start justify-between mb-2">
-                <View className="flex-1">
-                  <Text className="text-white font-semibold text-lg mb-1">
-                    {nextTopicSuggestion.topic}
-                  </Text>
-                  <Text className="text-gray-300 text-sm mb-2">
-                    {nextTopicSuggestion.reason}
-                  </Text>
-                  <View className="flex-row items-center space-x-4">
-                    <View className="flex-row items-center">
-                      <Feather name="clock" size={12} color="#9CA3AF" />
-                      <Text className="text-gray-400 text-xs ml-1">
-                        {nextTopicSuggestion.estimated_duration} min
-                      </Text>
-                    </View>
-                    <View className="flex-row items-center">
-                      <Feather name="trending-up" size={12} color="#9CA3AF" />
-                      <Text className="text-gray-400 text-xs ml-1 capitalize">
-                        {nextTopicSuggestion.difficulty}
-                      </Text>
-                    </View>
-                  </View>
-                  {nextTopicSuggestion.tags && nextTopicSuggestion.tags.length > 0 && (
-                    <View className="flex-row flex-wrap mt-2">
-                      {nextTopicSuggestion.tags.slice(0, 3).map((tag: string, index: number) => (
-                        <View key={index} className="bg-purple-500/20 rounded-full px-2 py-1 mr-2 mb-1">
-                          <Text className="text-purple-300 text-xs">#{tag}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-                <TouchableOpacity 
-                  onPress={useTopicSuggestion}
-                  className="bg-purple-600 rounded-lg px-4 py-2 ml-3"
-                >
-                  <Text className="text-white text-sm font-medium">Use This</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <View className="mx-4 mb-4 bg-gray-900 rounded-lg p-4 border border-gray-700 border-dashed">
-              <View className="flex-row items-center justify-center">
-                <Feather name="zap" size={20} color="#9CA3AF" style={{ marginRight: 8 }} />
-                <Text className="text-gray-400 text-sm">
-                  Get AI-powered study suggestions based on your history
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
+
 
         {/* My Circles Section */}
         <View className="border-t border-gray-800">
