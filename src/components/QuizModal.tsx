@@ -122,7 +122,6 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, spr
         setUserAnswers(new Array(quiz.mcq_json.questions.length).fill(-1));
       } else {
         // Quiz might still be generating - show a message
-        console.log('Quiz not found for sprint, might still be generating...');
         await generateSampleQuiz();
       }
     } catch (error) {
@@ -155,7 +154,6 @@ Return the response in this exact JSON format:
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`QuizModal: Attempting to generate quiz (attempt ${attempt}/${maxRetries})`);
         
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -187,7 +185,6 @@ Return the response in this exact JSON format:
         const data = await response.json();
         const quizContent = JSON.parse(data.choices[0].message.content);
         
-        console.log(`QuizModal: Quiz generation successful on attempt ${attempt}`);
         return quizContent;
       } catch (error) {
         console.error(`QuizModal: Quiz generation attempt ${attempt} failed:`, error);
@@ -199,7 +196,6 @@ Return the response in this exact JSON format:
         
         // Exponential backoff: wait 1s, 2s, 4s between retries
         const delay = Math.pow(2, attempt - 1) * 1000;
-        console.log(`QuizModal: Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -242,7 +238,6 @@ Return the response in this exact JSON format:
         .single();
 
       if (existingQuiz) {
-        console.log('Quiz already exists for this summary');
         setQuiz(existingQuiz);
         setUserAnswers(new Array(existingQuiz.mcq_json.questions.length).fill(-1));
         return;
@@ -253,7 +248,6 @@ Return the response in this exact JSON format:
       
       // Fall back to sample quiz if ChatGPT fails
       if (!quizData) {
-        console.log('QuizModal: Falling back to sample quiz due to generation failure');
         quizData = {
           questions: [
             {

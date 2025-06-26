@@ -97,7 +97,6 @@ export default function ConceptMapModal({
       if (response.ok) {
         const result = await response.json();
         setConceptMapData(result.conceptMap);
-        console.log('Concept map generated successfully');
       } else {
         Alert.alert('Error', 'Failed to generate concept map. Please try again.');
       }

@@ -14,15 +14,6 @@ export default function LoginScreen() {
   
   const { signIn, signOut, user } = useAuth()
 
-  // If user is already signed in but on login screen, they might be stuck
-  useEffect(() => {
-    if (user) {
-      console.log('User already signed in, might need to sign out or create profile')
-    }
-  }, [user])
-
-
-
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please fill in all fields')

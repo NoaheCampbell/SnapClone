@@ -21,7 +21,6 @@ serve(async (req) => {
   }
 
   try {
-    console.log('Environment check:', {
       hasRemoteUrl: !!Deno.env.get('REMOTE_SUPABASE_URL'),
       hasServiceKey: !!Deno.env.get('REMOTE_SUPABASE_SERVICE_ROLE_KEY'),
       hasOpenAI: !!Deno.env.get('OPENAI_API_KEY')

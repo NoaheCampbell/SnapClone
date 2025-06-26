@@ -241,7 +241,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error };
       }
       
-      console.log('Profile created successfully in DB:', data);
       setProfile(data);
       return { error: null };
 

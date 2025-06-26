@@ -36,12 +36,9 @@ export default function CreateProfileScreen() {
     setLoading(true)
     
     try {
-      console.log('handleCreateProfile: Starting...');
       const { error } = await createProfile(username.trim(), displayName.trim() || undefined);
 
       if (error) {
-        // The error from createProfile is now guaranteed to be an Error object or a Supabase error
-        console.error('handleCreateProfile: Failed!', error);
         
         // Check for Supabase unique constraint violation
         if (error.message.includes('duplicate key value violates unique constraint')) {
@@ -50,7 +47,6 @@ export default function CreateProfileScreen() {
           Alert.alert('Error Creating Profile', error.message || 'An unknown error occurred.');
         }
       } else {
-        console.log('handleCreateProfile: Success! Navigating...');
         // Small delay to ensure profile state updates
         setTimeout(() => {
           router.replace('/');

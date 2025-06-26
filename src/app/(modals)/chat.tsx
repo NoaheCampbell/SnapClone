@@ -768,12 +768,20 @@ export default function ChatScreen() {
           {chatTitle}
         </Text>
         {isCircle && (
-          <TouchableOpacity onPress={() => {
-            setShowAddMembers(true)
-            loadAvailableFriends()
-          }} className="mr-3">
-            <Feather name="user-plus" size={22} color="white" />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity 
+              onPress={() => router.push(`/(modals)/circle-settings?circleId=${channelId}`)}
+              className="mr-3"
+            >
+              <Feather name="settings" size={22} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => {
+              setShowAddMembers(true)
+              loadAvailableFriends()
+            }} className="mr-3">
+              <Feather name="user-plus" size={22} color="white" />
+            </TouchableOpacity>
+          </>
         )}
         <TouchableOpacity onPress={confirmLeaveChat}>
           <Feather name="trash-2" size={22} color="white" />

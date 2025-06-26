@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -47,7 +47,6 @@ export default function InboxScreen() {
         .channel(`inbox:${user.id}`)
         // Listen for broadcast events when users leave chats
         .on('broadcast', { event: 'user-left-chat' }, (payload) => {
-          console.log('Received user-left-chat broadcast, refreshing chats')
           loadCircles()
         })
         // Someone just added *this* user to a channel (a new chat was created)
@@ -60,7 +59,6 @@ export default function InboxScreen() {
             filter: `user_id=eq.${user.id}`,
           },
           () => {
-            console.log('Added to circle, refreshing list')
             loadCircles()
           }
         )
@@ -74,7 +72,6 @@ export default function InboxScreen() {
             filter: `user_id=eq.${user.id}`,
           },
           () => {
-            console.log('Removed from circle, refreshing list')
             loadCircles()
           }
         )
@@ -97,7 +94,6 @@ export default function InboxScreen() {
             table: 'messages',
           },
           () => {
-            console.log('Message deleted, refreshing chats')
             loadCircles()
           }
         )
@@ -150,9 +146,31 @@ export default function InboxScreen() {
   // For now we don't have per-member avatars for circles; return null to show default icon
   const getCircleAvatar = (_circle: CirclePreview) => null
 
+  const showCircleOptions = (circle: CirclePreview) => {
+    Alert.alert(
+      circle.name,
+      'Choose an action',
+      [
+        {
+          text: 'Open Chat',
+          onPress: () => router.push(`/(modals)/chat?circleId=${circle.id}`)
+        },
+        {
+          text: 'Circle Settings',
+          onPress: () => router.push(`/(modals)/circle-settings?circleId=${circle.id}`)
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
+  };
+
   const renderCircleItem = ({ item }: { item: CirclePreview }) => (
     <TouchableOpacity
       onPress={() => router.push(`/(modals)/chat?circleId=${item.id}`)}
+      onLongPress={() => showCircleOptions(item)}
       className="flex-row items-center p-4 border-b border-gray-800"
     >
       <View className="w-12 h-12 rounded-full bg-gray-600 items-center justify-center mr-3">
@@ -161,9 +179,14 @@ export default function InboxScreen() {
       
       <View className="flex-1">
         <View className="flex-row justify-between items-center mb-1">
-          <Text className="text-white font-semibold text-base">
-            {getCircleDisplayName(item)}
-          </Text>
+          <View className="flex-1 flex-row items-center">
+            <Text className="text-white font-semibold text-base flex-1">
+              {getCircleDisplayName(item)}
+            </Text>
+            {item.visibility === 'public' && (
+              <Feather name="globe" size={14} color="#9CA3AF" style={{ marginLeft: 8 }} />
+            )}
+          </View>
           {item.last_message_at ? (
             <Text className="text-gray-400 text-sm" numberOfLines={1}>
               Last activity {formatTime(item.last_message_at)} ago
@@ -175,10 +198,18 @@ export default function InboxScreen() {
           )}
         </View>
         
-        {/* Placeholder for future last-message preview */}
-        <Text className="text-gray-500 text-sm italic">
-          {item.member_count} member{item.member_count !== 1 ? 's' : ''}
-        </Text>
+        {/* Show member count and role */}
+        <View className="flex-row items-center">
+          <Text className="text-gray-500 text-sm italic">
+            {item.member_count} member{item.member_count !== 1 ? 's' : ''}
+          </Text>
+          {item.role === 'owner' && (
+            <View className="flex-row items-center ml-2">
+              <Feather name="star" size={12} color="#F59E0B" />
+              <Text className="text-yellow-500 text-xs ml-1">Owner</Text>
+            </View>
+          )}
+        </View>
       </View>
     </TouchableOpacity>
   )
@@ -199,9 +230,14 @@ export default function InboxScreen() {
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
           <Text className="text-white text-xl font-bold">Circles</Text>
-          <TouchableOpacity onPress={() => router.push('/(modals)/new-chat')}>
-            <Feather name="edit" size={24} color="white" />
-          </TouchableOpacity>
+          <View className="flex-row items-center space-x-3">
+            <TouchableOpacity onPress={() => router.push('/(modals)/discover-circles')}>
+              <Feather name="search" size={24} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/(modals)/new-chat')}>
+              <Feather name="edit" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Circle List */}
@@ -219,14 +255,22 @@ export default function InboxScreen() {
               No circles yet
             </Text>
             <Text className="text-gray-500 text-sm mt-2 text-center">
-              Start a conversation with your friends
+              Start a conversation with your friends or discover public circles
             </Text>
-            <TouchableOpacity 
-              onPress={() => router.push('/(modals)/new-chat')}
-              className="bg-blue-500 px-6 py-3 rounded-full mt-6"
-            >
-              <Text className="text-white font-semibold">Start Circle</Text>
-            </TouchableOpacity>
+            <View className="flex-row space-x-3 mt-6">
+              <TouchableOpacity 
+                onPress={() => router.push('/(modals)/new-chat')}
+                className="bg-blue-500 px-6 py-3 rounded-full"
+              >
+                <Text className="text-white font-semibold">Start Circle</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => router.push('/(modals)/discover-circles')}
+                className="bg-green-500 px-6 py-3 rounded-full"
+              >
+                <Text className="text-white font-semibold">Discover</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </View>

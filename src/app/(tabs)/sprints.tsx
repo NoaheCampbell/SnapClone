@@ -146,8 +146,6 @@ export default function SprintsTab() {
         throw circlesError;
       }
 
-      console.log('Loaded circles:', circles);
-
       // Get active sprint counts for each circle
       const circlesWithStats: Circle[] = await Promise.all(
         (circles || []).map(async (circle: any) => {
@@ -514,7 +512,6 @@ export default function SprintsTab() {
       if (suggestionResponse.ok) {
         const result = await suggestionResponse.json();
         setNextTopicSuggestion(result.suggestion);
-        console.log('Next topic suggestion generated:', result.suggestion);
       } else {
         console.error('Failed to generate topic suggestion');
       }
@@ -536,7 +533,6 @@ export default function SprintsTab() {
 
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
     try {
-      console.log(`Generating RAG-enhanced content for sprint: ${topic}`);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -551,7 +547,6 @@ export default function SprintsTab() {
 
       if (existingSummary) {
         summary = existingSummary;
-        console.log(`Summary already exists for sprint ${sprintId}`);
       } else {
         // Generate AI summary with RAG using edge function
         try {
@@ -572,7 +567,6 @@ export default function SprintsTab() {
           if (summaryResponse.ok) {
             const summaryResult = await summaryResponse.json();
             summary = summaryResult.summary;
-            console.log('RAG summary generated successfully');
           } else {
             throw new Error('Summary generation failed');
           }
@@ -605,7 +599,6 @@ export default function SprintsTab() {
         .single();
 
       if (existingQuiz) {
-        console.log(`Quiz already exists for sprint ${sprintId}`);
         return;
       }
 
@@ -631,7 +624,6 @@ export default function SprintsTab() {
         if (gapAwareQuizResponse.ok) {
           const gapAwareResult = await gapAwareQuizResponse.json();
           quizContent = gapAwareResult.quiz;
-          console.log('Gap-aware quiz generated successfully using RAG');
         } else {
           throw new Error('Gap-aware quiz generation failed');
         }
@@ -647,8 +639,6 @@ export default function SprintsTab() {
 
           if (quizError) {
             console.error('Error storing quiz:', quizError);
-          } else {
-            console.log(`RAG-enhanced quiz with ${questionCount} questions generated successfully`);
           }
         }
       } catch (error) {
@@ -666,8 +656,6 @@ export default function SprintsTab() {
 
           if (quizError) {
             console.error('Error storing fallback quiz:', quizError);
-          } else {
-            console.log(`Fallback quiz generated successfully`);
           }
         }
       }
@@ -697,7 +685,6 @@ Return the response in this exact JSON format:
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`Attempting to generate quiz (attempt ${attempt}/${maxRetries})`);
         
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -729,7 +716,6 @@ Return the response in this exact JSON format:
         const data = await response.json();
         const quizContent = JSON.parse(data.choices[0].message.content);
         
-        console.log(`Quiz generation successful on attempt ${attempt}`);
         return quizContent;
       } catch (error) {
         console.error(`Quiz generation attempt ${attempt} failed:`, error);
@@ -741,7 +727,6 @@ Return the response in this exact JSON format:
         
         // Exponential backoff: wait 1s, 2s, 4s between retries
         const delay = Math.pow(2, attempt - 1) * 1000;
-        console.log(`Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -783,7 +768,6 @@ Return the response in this exact JSON format:
           table: 'sprints'
         },
         () => {
-          console.log('Sprints table changed, reloading data...');
           loadData();
         }
       )
@@ -795,12 +779,10 @@ Return the response in this exact JSON format:
           table: 'circle_members'
         },
         (payload) => {
-          console.log('Circle membership changed:', payload);
           // Only reload if the change affects the current user
           const newRecord = payload.new as any;
           const oldRecord = payload.old as any;
           if (newRecord?.user_id === user?.id || oldRecord?.user_id === user?.id) {
-            console.log('Current user affected, reloading data...');
             loadData();
           }
         }
@@ -813,7 +795,6 @@ Return the response in this exact JSON format:
           table: 'circles'
         },
         () => {
-          console.log('Circles table changed, reloading data...');
           loadData();
         }
       )

@@ -87,7 +87,6 @@ export default function SendToModal() {
 
   const handleSend = async () => {
     if (!uri || selectedIds.size === 0 || !user) {
-      console.log('[SendTo] Missing uri or recipients, aborting');
       return;
     }
     try {
@@ -98,7 +97,6 @@ export default function SendToModal() {
       // ---------------------------------------------------------
       const channelMap = new Map<string, string>(); // recipientId -> channelId
       for (const rid of selectedIds) {
-        console.log('[SendTo] ensuring DM channel with', rid);
         const chId = await ensureDmChannel(rid);
         if (chId) channelMap.set(rid, chId);
       }
@@ -122,14 +120,12 @@ export default function SendToModal() {
         webp: 'image/webp',
       };
       const contentType = mimeMap[fileExt] || `image/${fileExt}`;
-      console.log('[SendTo] Fetching photo data, ext', fileExt, 'ctype', contentType);
       // Read local file as base64 to avoid malformed fetch results on some platforms
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
       const arrayBuf = decode(base64);
       const path = `${firstChannelId}/${Date.now()}.${fileExt}`;
-      console.log('[SendTo] Uploading to chat-media/', path);
 
       const { error: upErr } = await supabase.storage.from('chat-media').upload(path, arrayBuf as any, {
         cacheControl: '3600',
@@ -141,16 +137,13 @@ export default function SendToModal() {
         throw upErr;
       }
 
-      console.log('[SendTo] Upload successful');
 
       const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path);
-      console.log('[SendTo] publicUrl', publicUrl);
 
       // ---------------------------------------------------------
       // 3. Insert a message in every channel referencing this image
       // ---------------------------------------------------------
       for (const [rid, channelId] of channelMap.entries()) {
-        console.log('[SendTo] inserting message for channel', channelId, 'recipient', rid);
         const { error: msgErr } = await supabase.from('messages').insert({
           channel_id: channelId,
           sender_id: user.id,
@@ -171,7 +164,6 @@ export default function SendToModal() {
   };
 
   const ensureDmChannel = async (otherId: string): Promise<string | null> => {
-    console.log('[SendTo] ensureDmChannel start', otherId);
     try {
       // Step 1: find channel ids where current user is a member
       const { data: myLinks, error: myErr } = await supabase
@@ -199,7 +191,6 @@ export default function SendToModal() {
           .eq('channel_id', ch.id);
         const memberIds = (members || []).map((m: any) => m.member_id);
         if (memberIds.length === 2 && memberIds.includes(otherId) && memberIds.includes(user!.id)) {
-          console.log('[SendTo] existing 1-1 channel found', ch.id);
           return ch.id;
         }
       }
@@ -217,7 +208,6 @@ export default function SendToModal() {
         { channel_id: channelRow.id, member_id: otherId },
       ]);
 
-      console.log('[SendTo] new dm channel created', channelRow.id);
       return channelRow.id;
     } catch (e) {
       console.warn('ensureDmChannel error', e);
