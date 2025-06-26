@@ -1,10 +1,11 @@
-import {
-  Grayscale,
-  ColorMatrix,
-  concatColorMatrices,
-  brightness,
-  saturate
-} from 'react-native-color-matrix-image-filters';
+// Temporarily disabled - removed react-native-color-matrix-image-filters
+// import {
+//   Grayscale,
+//   ColorMatrix,
+//   concatColorMatrices,
+//   brightness,
+//   saturate
+// } from 'react-native-color-matrix-image-filters';
 
 export interface FilterConfig {
   id: string;
@@ -58,11 +59,11 @@ export const photoFilters: FilterConfig[] = [
   }
 ];
 
-// Export filter components for easy use
-export {
-  Grayscale,
-  ColorMatrix,
-  concatColorMatrices,
-  brightness,
-  saturate
-}; 
+// Temporarily disabled - filter components not available
+// export {
+//   Grayscale,
+//   ColorMatrix,
+//   concatColorMatrices,
+//   brightness,
+//   saturate
+// }; 
