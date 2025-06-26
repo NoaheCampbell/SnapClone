@@ -23,6 +23,7 @@ interface CircleDetails {
   sprint_minutes: number;
   ttl_minutes: number;
   owner: string;
+  allow_member_invites: boolean;
   members: Array<{
     user_id: string;
     username: string;
@@ -70,12 +71,29 @@ export default function CircleSettingsScreen() {
   const [showInvites, setShowInvites] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
 
+  const [muteNotifications, setMuteNotifications] = useState<boolean>(false);
+
+  const [allowInvites, setAllowInvites] = useState<boolean>(true);
+
   useEffect(() => {
     if (circleId) {
       loadCircleDetails();
       getCurrentUser();
     }
   }, [circleId]);
+
+  useEffect(() => {
+    if (!circle?.id || !currentUserId) return;
+    supabase
+      .from('circle_members')
+      .select('mute_notifications')
+      .eq('circle_id', circle.id)
+      .eq('user_id', currentUserId)
+      .single()
+      .then(({ data }) => {
+        if (data) setMuteNotifications(data.mute_notifications);
+      });
+  }, [circle?.id, currentUserId]);
 
   const getCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -104,6 +122,19 @@ export default function CircleSettingsScreen() {
       setNewName(data.name);
       setNewSprintMinutes(data.sprint_minutes);
       setNewTtlMinutes(data.ttl_minutes);
+      setAllowInvites(data.allow_member_invites);
+
+      // fetch allow_member_invites column directly (RPC may not include it)
+      const { data: allowRow } = await supabase
+        .from('circles')
+        .select('allow_member_invites')
+        .eq('id', circleId)
+        .single();
+      if (allowRow) {
+        console.log('Fetched allow_member_invites =', allowRow.allow_member_invites);
+        setAllowInvites(allowRow.allow_member_invites);
+      }
+
     } catch (error) {
       console.error('Error loading circle details:', error);
       Alert.alert('Error', 'Failed to load circle details');
@@ -508,6 +539,15 @@ export default function CircleSettingsScreen() {
     }
   };
 
+  const toggleMute = async (value: boolean) => {
+    setMuteNotifications(value);
+    await supabase
+      .from('circle_members')
+      .update({ mute_notifications: value })
+      .eq('circle_id', circle?.id)
+      .eq('user_id', currentUserId);
+  };
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black">
@@ -615,6 +655,26 @@ export default function CircleSettingsScreen() {
           </View>
         </View>
 
+        {/* Notification Preferences */}
+        <View className="p-4 border-b border-gray-800">
+          <Text className="text-white text-lg font-bold mb-3">Notifications</Text>
+          <View className="flex-row items-center justify-between p-3 bg-gray-800 rounded-lg">
+            <View className="flex-row items-center flex-1">
+              <Feather name="bell" size={20} color="white" style={{ marginRight: 12 }} />
+              <View className="flex-1">
+                <Text className="text-white font-medium">Message Notifications</Text>
+                <Text className="text-gray-400 text-sm">{muteNotifications ? 'Muted' : 'Enabled'}</Text>
+              </View>
+            </View>
+            <Switch
+              value={!muteNotifications}
+              onValueChange={(val)=>toggleMute(!val ? true:false)}
+              trackColor={{ false: '#767577', true: '#81b0ff' }}
+              thumbColor={!muteNotifications ? '#f5dd4b' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
         {/* Sprint Settings */}
         {canEdit && (
           <View className="p-4 border-b border-gray-800">
@@ -682,7 +742,7 @@ export default function CircleSettingsScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={createInvite}
-                  disabled={creatingInvite}
+                  disabled={creatingInvite || (!isOwner && !allowInvites)}
                   className="flex-row items-center"
                 >
                   <Feather name="plus" size={20} color="#60A5FA" />
@@ -762,6 +822,43 @@ export default function CircleSettingsScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Allow invites section */}
+        {isOwner && (
+          <View className="p-4 border-b border-gray-800">
+            <Text className="text-white text-lg font-bold mb-3">Member Invite Permissions</Text>
+            <View className="flex-row items-center justify-between p-3 bg-gray-800 rounded-lg">
+              <View className="flex-row items-center flex-1">
+                <Feather name="link" size={20} color="white" style={{ marginRight: 12 }} />
+                <View className="flex-1">
+                  <Text className="text-white font-medium">Allow members to create invite codes</Text>
+                </View>
+              </View>
+              <Switch
+                value={allowInvites}
+                onValueChange={async (val) => {
+                  setAllowInvites(val);
+                  
+                  const { error } = await supabase
+                    .from('circles')
+                    .update({ allow_member_invites: val })
+                    .eq('id', circle.id);
+                  
+                  if (error) {
+                    console.error('Error updating allow_member_invites:', error);
+                    setAllowInvites(!val);
+                    Alert.alert('Update failed', 'Could not change invite permissions');
+                  } else {
+                    // update local circle object so other parts reflect change
+                    setCircle((prev: any) => ({ ...prev, allow_member_invites: val }));
+                  }
+                }}
+                trackColor={{ false:'#767577',true:'#81b0ff'}}
+                thumbColor={allowInvites ? '#f5dd4b' : '#f4f3f4'}
+              />
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* Add Members Modal */}
@@ -851,7 +948,7 @@ export default function CircleSettingsScreen() {
             <Text className="text-white text-lg font-semibold">Invite Codes</Text>
             <TouchableOpacity
               onPress={createInvite}
-              disabled={creatingInvite}
+              disabled={creatingInvite || (!isOwner && !allowInvites)}
             >
               <Text className={`text-lg font-semibold ${
                 !creatingInvite ? 'text-blue-400' : 'text-gray-500'
