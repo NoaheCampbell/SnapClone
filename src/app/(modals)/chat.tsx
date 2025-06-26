@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, Modal, TouchableWithoutFeedback } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -9,6 +9,8 @@ import { Video, ResizeMode } from 'expo-av'
 import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system'
 import * as SecureStore from 'expo-secure-store'
+// @ts-ignore
+import EmojiPicker from 'rn-emoji-keyboard'
 
 // Secure API key storage
 const OPENAI_API_KEY_STORAGE = 'openai_api_key'
@@ -66,7 +68,33 @@ interface Message {
   is_own_message: boolean
   media_url?: string
   media_type?: string
+  reactions?: { emoji: string; count: number; reactedByMe: boolean }[]
 }
+
+const REACTIONS = ['👍','🔥','📚'] as const
+
+const emojiDarkTheme = {
+  backdrop: 'rgba(0,0,0,0.6)',
+  knob: '#4B5563',
+  container: '#1F2937',
+  header: '#1F2937',
+  category: {
+    icon: '#9CA3AF',
+    iconActive: '#FFFFFF',
+    container: '#1F2937',
+    containerActive: '#374151'
+  },
+  search: {
+    background: '#374151',
+    text: '#FFFFFF',
+    placeholder: '#9CA3AF',
+    icon: '#D1D5DB'
+  },
+  emoji: {
+    background: '#1F2937',
+    emoji: '#FFFFFF'
+  }
+} as const;
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ circleId?: string; channelId?: string }>()
@@ -93,6 +121,9 @@ export default function ChatScreen() {
   const [availableFriends, setAvailableFriends] = useState<Array<{user_id: string, username: string}>>([])
   const [selectedNewMembers, setSelectedNewMembers] = useState<string[]>([])
   const [addingMembers, setAddingMembers] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
+  const [reactionsMap, setReactionsMap] = useState<Record<number, {emoji:string; user_id:string}[]>>({})
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
@@ -223,6 +254,53 @@ export default function ChatScreen() {
       }
     }
   }, [channelId])
+
+  useEffect(() => {
+    if (messages.length === 0) return
+    const messageIds = messages.map(m => m.id)
+    supabase
+      .from('message_reactions')
+      .select('*')
+      .in('message_id', messageIds)
+      .then(({ data }) => {
+        const map: Record<number, {emoji:string; user_id:string}[]> = {}
+        data?.forEach(r => {
+          if (!map[r.message_id]) map[r.message_id] = []
+          map[r.message_id].push({ emoji: r.emoji, user_id: r.user_id })
+        })
+        setReactionsMap(map)
+      })
+  }, [messages])
+
+  useEffect(() => {
+    const sub = supabase.channel('message-reactions')
+      .on('postgres_changes', { schema:'public', table:'message_reactions', event:'INSERT' }, payload => {
+        const r = payload.new as any
+        setReactionsMap(prev => {
+          const list = [...(prev[r.message_id] || []), { emoji:r.emoji, user_id:r.user_id }]
+          return { ...prev, [r.message_id]: list }
+        })
+      })
+      .on('postgres_changes', { schema:'public', table:'message_reactions', event:'UPDATE' }, payload => {
+        const r = payload.new as any
+        setReactionsMap(prev => {
+          const list = (prev[r.message_id] || []).filter(x => x.user_id !== r.user_id)
+          list.push({ emoji:r.emoji, user_id:r.user_id })
+          return { ...prev, [r.message_id]: list }
+        })
+      })
+      .on('postgres_changes', { schema:'public', table:'message_reactions', event:'DELETE' }, payload => {
+        const r = payload.old as any
+        setReactionsMap(prev => {
+          const list = (prev[r.message_id] || []).filter(x => x.user_id !== r.user_id)
+          const newMap = { ...prev, [r.message_id]: list }
+          if (list.length === 0) delete newMap[r.message_id]
+          return newMap
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(sub) }
+  }, [])
 
   const loadChatInfo = async () => {
     try {
@@ -458,53 +536,70 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => (
     <View className={`mb-3 ${item.is_own_message ? 'items-end' : 'items-start'}`}>
-      <View className={`max-w-[80%] p-3 rounded-2xl ${
-        item.is_own_message 
-          ? 'bg-blue-500 rounded-br-md' 
-          : 'bg-gray-700 rounded-bl-md'
-      }`}>
-        {!item.is_own_message && (
-          <Text className="text-gray-300 text-xs mb-1 font-semibold">
-            {item.sender_name}
-          </Text>
-        )}
+      <TouchableOpacity activeOpacity={0.8} onLongPress={() => openReactionPicker(item.id)}>
+        <View className={`max-w-[80%] p-3 rounded-2xl ${
+          item.is_own_message 
+            ? 'bg-blue-500 rounded-br-md' 
+            : 'bg-gray-700 rounded-bl-md'
+        }`}>
+          {!item.is_own_message && (
+            <Text className="text-gray-300 text-xs mb-1 font-semibold">
+              {item.sender_name}
+            </Text>
+          )}
 
-        {/* Media rendering */}
-        {item.media_url ? (
-          /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
-            <Video
-              source={{ uri: item.media_url }}
-              style={{ width: 200, height: 200 }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-            />
+          {/* Media rendering */}
+          {item.media_url ? (
+            /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
+              <Video
+                source={{ uri: item.media_url }}
+                style={{ width: 200, height: 200 }}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+              />
+            ) : (
+              <Image
+                source={{ uri: item.media_url }}
+                style={{ width: 200, height: 200, borderRadius: 8 }}
+              />
+            )
           ) : (
-            <Image
-              source={{ uri: item.media_url }}
-              style={{ width: 200, height: 200, borderRadius: 8 }}
-            />
-          )
-        ) : (
-          <Text className="text-white text-base">
-            {item.content}
-          </Text>
-        )}
-        <View className="flex-row items-center justify-between mt-1">
-          <Text className={`text-xs ${
-            item.is_own_message ? 'text-blue-100' : 'text-gray-400'
-          }`}>
-            {formatTime(item.created_at)}
-          </Text>
-          {item.is_own_message && (
-            <Feather
-              name={receipts[item.id]?.length ? 'check-circle' : 'check'}
-              size={14}
-              color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
-              style={{ marginLeft: 4 }}
-            />
+            <Text className="text-white text-base">
+              {item.content}
+            </Text>
+          )}
+          <View className="flex-row items-center justify-between mt-1">
+            <Text className={`text-xs ${
+              item.is_own_message ? 'text-blue-100' : 'text-gray-400'
+            }`}>
+              {formatTime(item.created_at)}
+            </Text>
+            {item.is_own_message && (
+              <Feather
+                name={receipts[item.id]?.length ? 'check-circle' : 'check'}
+                size={14}
+                color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
+                style={{ marginLeft: 4 }}
+              />
+            )}
+          </View>
+
+          {/* Reactions bar */}
+          {reactionsMap[item.id] && (
+            <View className="flex-row mt-1 space-x-2">
+              {Array.from(new Set(reactionsMap[item.id].map(r => r.emoji))).map(e => {
+                const list = reactionsMap[item.id].filter(r => r.emoji === e)
+                return (
+                  <View key={e} className="flex-row items-center bg-black/20 px-1.5 py-0.5 rounded-full">
+                    <Text className="text-sm mr-1">{e}</Text>
+                    <Text className="text-xs text-white">{list.length}</Text>
+                  </View>
+                )
+              })}
+            </View>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     </View>
   )
 
@@ -746,6 +841,67 @@ export default function ChatScreen() {
       setAddingMembers(false)
     }
   }
+
+  const openReactionPicker = (msgId:number) => {
+    setSelectedMessageId(msgId)
+    setShowEmojiPicker(true)
+  }
+
+  const handlePickReaction = async (emoji: string) => {
+    setShowEmojiPicker(false)
+    if (!selectedMessageId) return
+    const { data:{ user } } = await supabase.auth.getUser()
+    if (!user) return
+    // check existing reaction by this user
+    const existing = reactionsMap[selectedMessageId]?.find(r => r.user_id === user.id)
+    if (existing) {
+      if (existing.emoji === emoji) {
+        // unreact (toggle off)
+        await supabase
+          .from('message_reactions')
+          .delete()
+          .eq('message_id', selectedMessageId)
+          .eq('user_id', user.id)
+        setReactionsMap(prev => {
+          const list = (prev[selectedMessageId] || []).filter(x => x.user_id !== user.id)
+          const newMap = { ...prev, [selectedMessageId]: list }
+          if (list.length === 0) delete newMap[selectedMessageId]
+          return newMap
+        })
+      } else {
+        // change emoji
+        await supabase
+          .from('message_reactions')
+          .upsert({ message_id: selectedMessageId, user_id: user.id, emoji }, { onConflict: 'message_id,user_id' })
+        setReactionsMap(prev => {
+          const list = (prev[selectedMessageId] || []).filter(x => x.user_id !== user.id)
+          list.push({ emoji, user_id: user.id })
+          return { ...prev, [selectedMessageId]: list }
+        })
+      }
+    } else {
+      // first time reaction
+      await supabase
+        .from('message_reactions')
+        .insert({ message_id: selectedMessageId, user_id: user.id, emoji })
+      setReactionsMap(prev => {
+        const list = [...(prev[selectedMessageId] || []), { emoji, user_id: user.id }]
+        return { ...prev, [selectedMessageId]: list }
+      })
+    }
+  }
+
+  const ReactionPicker = () => (
+    <EmojiPicker
+      theme={emojiDarkTheme as any}
+      onEmojiSelected={(emoji: { emoji: string }) => {
+        handlePickReaction(emoji.emoji);
+        setShowEmojiPicker(false);
+      }}
+      open={showEmojiPicker}
+      onClose={() => setShowEmojiPicker(false)}
+    />
+  )
 
   if (loading) {
     return (
@@ -990,6 +1146,8 @@ export default function ChatScreen() {
           </View>
         </View>
       )}
+
+      <ReactionPicker />
     </SafeAreaView>
   )
 } 

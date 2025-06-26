@@ -54,6 +54,7 @@ export default function QuizModal({ visible, onClose, sprintId, sprintTopic, spr
   const [hasAlreadyTaken, setHasAlreadyTaken] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [quizTimeLimit, setQuizTimeLimit] = useState(0);
+  const MAX_QUIZ_QUESTIONS = 10;
 
   useEffect(() => {
     if (visible && sprintId) {
@@ -500,6 +501,18 @@ Provide ONE specific, actionable study tip to help them understand this concept 
           content: `🧠 ${username} completed the "${sprintTopic}" quiz and scored ${finalScore}%!`
         });
 
+      // Mark sprint as counting for streak if criteria met
+      if (
+        finalScore >= 90 &&
+        quiz.mcq_json.questions.length === MAX_QUIZ_QUESTIONS &&
+        sprintDuration >= 20
+      ) {
+        await supabase
+          .from('sprints')
+          .update({ counts_for_streak: true })
+          .eq('id', sprintId)
+      }
+
       setShowResults(true);
     } catch (error) {
       console.error('Error submitting quiz:', error);
@@ -550,8 +563,6 @@ Provide ONE specific, actionable study tip to help them understand this concept 
     
     return suggestions;
   };
-
-
 
   const handleClose = () => {
     setQuiz(null);

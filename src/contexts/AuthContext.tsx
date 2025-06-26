@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
+import * as Localization from 'expo-localization'
+import * as Notifications from 'expo-notifications'
 
 // WebBrowser.maybeCompleteAuthSession()
 
@@ -11,6 +13,7 @@ interface Profile {
   avatar_url?: string
   created_at: string
   last_active?: string
+  timezone?: string
 }
 
 interface AuthContextType {
@@ -274,12 +277,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-
-
   const updateLastActive = async () => {
     // Temporarily disabled to prevent database errors
     return;
   }
+
+  // Persist device timezone to profile once both user and profile are loaded
+  useEffect(() => {
+    const updateTimezone = async () => {
+      if (!user || !profile) return
+      try {
+        const deviceTz = (Localization as any).timezone ?? 'UTC'
+        if (profile.timezone !== deviceTz) {
+          await supabase
+            .from('profiles')
+            .update({ timezone: deviceTz })
+            .eq('user_id', user.id)
+        }
+      } catch (e) {
+        console.error('Failed to update timezone', e)
+      }
+    }
+    updateTimezone()
+  }, [user, profile])
+
+  useEffect(() => {
+    const savePushToken = async () => {
+      if (!user) return
+      try {
+        const perms = await Notifications.getPermissionsAsync()
+        if (perms.status !== 'granted') {
+          const req = await Notifications.requestPermissionsAsync()
+          if (req.status !== 'granted') return
+        }
+        const token = (await Notifications.getExpoPushTokenAsync()).data
+        if (!token) return
+        await supabase
+          .from('profiles')
+          .update({ expo_push_token: token })
+          .eq('user_id', user.id)
+      } catch (e) {
+        console.error('Push token error', e)
+      }
+    }
+    savePushToken()
+  }, [user])
 
   const value = {
     user,

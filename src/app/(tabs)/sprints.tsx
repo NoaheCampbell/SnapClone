@@ -36,6 +36,7 @@ interface Circle {
   name: string;
   member_count: number;
   active_sprints: number;
+  current_streak: number;
 }
 
 export default function SprintsTab() {
@@ -73,6 +74,8 @@ export default function SprintsTab() {
   const [showConceptMapModal, setShowConceptMapModal] = useState(false);
   const [conceptMapSprintId, setConceptMapSprintId] = useState<string>('');
   const [conceptMapSprintTopic, setConceptMapSprintTopic] = useState<string>('');
+
+  const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -148,22 +151,42 @@ export default function SprintsTab() {
       // Get active sprint counts for each circle
       const circlesWithStats: Circle[] = await Promise.all(
         (circles || []).map(async (circle: any) => {
-          const { count } = await supabase
-            .from('sprints')
-            .select('*', { count: 'exact', head: true })
-            .eq('circle_id', circle.id)
-            .gt('ends_at', new Date().toISOString());
+          const [{ count }, { data: streakRow }] = await Promise.all([
+            supabase
+              .from('sprints')
+              .select('*', { count: 'exact', head: true })
+              .eq('circle_id', circle.id)
+              .gt('ends_at', new Date().toISOString()),
+            supabase
+              .from('circles')
+              .select('current_streak')
+              .eq('id', circle.id)
+              .single()
+          ]);
 
           return {
             id: circle.id,
             name: circle.name,
             member_count: circle.member_count,
-            active_sprints: count || 0
+            active_sprints: count || 0,
+            current_streak: streakRow?.current_streak || 0
           };
         })
       );
 
       setMyCircles(circlesWithStats);
+
+      // Fetch user streak info
+      const { data: streakRow } = await supabase
+        .from('streaks')
+        .select('current_len, freeze_tokens')
+        .eq('user_id', user.id)
+        .single();
+      if (streakRow) {
+        setUserStreak({ current_len: streakRow.current_len, freeze_tokens: streakRow.freeze_tokens });
+      } else {
+        setUserStreak({ current_len: 0, freeze_tokens: 0 });
+      }
     } catch (error) {
       console.error('Error loading sprints data:', error);
     } finally {
@@ -274,7 +297,7 @@ export default function SprintsTab() {
       // Update sprint to end now
       const { error } = await supabase
         .from('sprints')
-        .update({ ends_at: new Date().toISOString() })
+        .update({ ends_at: new Date().toISOString(), stopped_early: true })
         .eq('id', sprintId);
 
       if (error) throw error;
@@ -343,6 +366,7 @@ export default function SprintsTab() {
         .from('sprints')
         .update({ 
           ends_at: new Date().toISOString(),
+          stopped_early: true,
           end_media_url: photoUrl
         })
         .eq('id', endingSprintId);
@@ -491,8 +515,6 @@ export default function SprintsTab() {
     setResultsSprintTopic(sprintTopic);
     setShowQuizResultsModal(true);
   };
-
-
 
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
     try {
@@ -768,8 +790,6 @@ Return the response in this exact JSON format:
     };
   }, [loadData]);
 
-
-
   const SwipeableSprintItem = memo(({ item }: { item: Sprint }) => {
     const isMySprintAndActive = item.user_id === user?.id && item.is_active;
     
@@ -951,7 +971,7 @@ Return the response in this exact JSON format:
         <View className="flex-1">
           <Text className="text-white font-semibold text-lg">{item.name}</Text>
           <Text className="text-gray-400 text-sm">
-            {item.member_count} members • {item.active_sprints} active sprints
+            {item.member_count} members • {item.active_sprints} active sprints • 🔥 {item.current_streak}
           </Text>
         </View>
         <View className="flex-row items-center">
@@ -987,6 +1007,16 @@ Return the response in this exact JSON format:
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
           <Text className="text-gray-400 text-sm">Focus together with your circles</Text>
+          <View className="flex-row items-center mt-1 space-x-4">
+            <View className="flex-row items-center">
+              <Feather name="zap" size={16} color="#FBBF24" />
+              <Text className="text-yellow-400 text-sm ml-1">{userStreak.current_len} day streak</Text>
+            </View>
+            <View className="flex-row items-center">
+              <Feather name="gift" size={16} color="#93C5FD" />
+              <Text className="text-blue-300 text-sm ml-1">{userStreak.freeze_tokens} tokens</Text>
+            </View>
+          </View>
         </View>
 
         {/* Active Sprints Section */}
