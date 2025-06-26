@@ -464,7 +464,17 @@ Provide ONE specific, actionable study tip to help them understand this concept 
         setLoadingSuggestions(false);
       }
 
-      // Save quiz attempt with improvement suggestions (only if quiz has a real database ID)
+      // Calculate missed concepts for RAG
+      const missedConcepts: string[] = [];
+      quiz.mcq_json.questions.forEach((question, index) => {
+        if (userAnswers[index] !== question.correct_answer) {
+          // Extract key concept from the question
+          const concept = question.question.split('?')[0].trim();
+          missedConcepts.push(concept);
+        }
+      });
+
+      // Save quiz attempt with improvement suggestions and missed concepts (only if quiz has a real database ID)
       if (!quiz.id.startsWith('temp_')) {
         const { error } = await supabase
           .from('quiz_attempts')
@@ -473,7 +483,8 @@ Provide ONE specific, actionable study tip to help them understand this concept 
             user_id: user.id,
             score: finalScore,
             answers: userAnswers,
-            improvement_suggestions: finalSuggestions
+            improvement_suggestions: finalSuggestions,
+            missed_concepts: missedConcepts
           });
 
         if (error) throw error;

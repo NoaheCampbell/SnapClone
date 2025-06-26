@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
@@ -11,6 +11,7 @@ import SprintCamera from '../../components/SprintCamera';
 import QuizModal from '../../components/QuizModal';
 import SprintCompletionModal from '../../components/SprintCompletionModal';
 import QuizResultsModal from '../../components/QuizResultsModal';
+import ConceptMapModal from '../../components/ConceptMapModal';
 
 interface Sprint {
   id: string;
@@ -68,6 +69,11 @@ export default function SprintsTab() {
   const [showQuizResultsModal, setShowQuizResultsModal] = useState(false);
   const [resultsSprintId, setResultsSprintId] = useState<string>('');
   const [resultsSprintTopic, setResultsSprintTopic] = useState<string>('');
+  const [nextTopicSuggestion, setNextTopicSuggestion] = useState<any>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [showConceptMapModal, setShowConceptMapModal] = useState(false);
+  const [conceptMapSprintId, setConceptMapSprintId] = useState<string>('');
+  const [conceptMapSprintTopic, setConceptMapSprintTopic] = useState<string>('');
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -489,15 +495,57 @@ export default function SprintsTab() {
     setShowQuizResultsModal(true);
   };
 
+  const fetchNextTopicSuggestion = async () => {
+    if (!user || loadingSuggestion) return;
+    
+    setLoadingSuggestion(true);
+    try {
+      const suggestionResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateNextTopicSuggestion`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          userId: user.id
+        })
+      });
+
+      if (suggestionResponse.ok) {
+        const result = await suggestionResponse.json();
+        setNextTopicSuggestion(result.suggestion);
+        console.log('Next topic suggestion generated:', result.suggestion);
+      } else {
+        console.error('Failed to generate topic suggestion');
+      }
+    } catch (error) {
+      console.error('Error fetching topic suggestion:', error);
+    } finally {
+      setLoadingSuggestion(false);
+    }
+  };
+
+  const useTopicSuggestion = () => {
+    if (nextTopicSuggestion) {
+      setSprintTopic(nextTopicSuggestion.topic);
+      setSprintGoals(`Study goal: ${nextTopicSuggestion.reason}`);
+      setCustomDuration(nextTopicSuggestion.estimated_duration.toString());
+      setNextTopicSuggestion(null); // Clear suggestion after use
+    }
+  };
+
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
     try {
-      console.log(`Generating ${questionCount} quiz questions for sprint: ${topic}`);
+      console.log(`Generating RAG-enhanced content for sprint: ${topic}`);
       
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       // Check if summary already exists for this sprint
       let summary;
       const { data: existingSummary } = await supabase
         .from('summaries')
-        .select('id')
+        .select('id, bullets, tags')
         .eq('sprint_id', sprintId)
         .single();
 
@@ -505,22 +553,48 @@ export default function SprintsTab() {
         summary = existingSummary;
         console.log(`Summary already exists for sprint ${sprintId}`);
       } else {
-        // Create a summary for this sprint
-        const { data: newSummary, error: summaryError } = await supabase
-          .from('summaries')
-          .insert({
-            sprint_id: sprintId,
-            bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
-            concept_map_url: null
-          })
-          .select()
-          .single();
+        // Generate AI summary with RAG using edge function
+        try {
+          const summaryResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateSummaryWithRAG`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+              sprintId,
+              topic,
+              goals,
+              tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
+            })
+          });
 
-        if (summaryError) {
-          console.error('Error creating summary:', summaryError);
-          return;
+          if (summaryResponse.ok) {
+            const summaryResult = await summaryResponse.json();
+            summary = summaryResult.summary;
+            console.log('RAG summary generated successfully');
+          } else {
+            throw new Error('Summary generation failed');
+          }
+        } catch (error) {
+          console.error('RAG summary generation failed, using fallback:', error);
+          // Fallback to simple summary
+          const { data: newSummary, error: summaryError } = await supabase
+            .from('summaries')
+            .insert({
+              sprint_id: sprintId,
+              bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
+              tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
+            })
+            .select()
+            .single();
+
+          if (summaryError) {
+            console.error('Error creating fallback summary:', summaryError);
+            return;
+          }
+          summary = newSummary;
         }
-        summary = newSummary;
       }
 
       // Check if quiz already exists for this summary
@@ -535,26 +609,67 @@ export default function SprintsTab() {
         return;
       }
 
-      // Generate quiz questions using ChatGPT with retries
-      const quizContent = await generateQuizWithChatGPT(topic, goals, questionCount);
-      
-      if (quizContent) {
-        // Store the quiz in the database
-        const { error: quizError } = await supabase
-          .from('quizzes')
-          .insert({
-            summary_id: summary.id,
-            mcq_json: quizContent
-          });
+      // Generate gap-aware quiz using RAG edge function
+      try {
+        const gapAwareQuizResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateGapAwareQuiz`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            sprintId,
+            topic,
+            goals,
+            tags: summary.tags || [],
+            questionCount,
+            userId: user.id
+          })
+        });
 
-        if (quizError) {
-          console.error('Error storing quiz:', quizError);
+        let quizContent;
+        if (gapAwareQuizResponse.ok) {
+          const gapAwareResult = await gapAwareQuizResponse.json();
+          quizContent = gapAwareResult.quiz;
+          console.log('Gap-aware quiz generated successfully using RAG');
         } else {
-          console.log(`Quiz with ${questionCount} questions generated successfully for sprint ${sprintId}`);
+          throw new Error('Gap-aware quiz generation failed');
         }
-      } else {
-        console.error(`Failed to generate quiz for sprint ${sprintId} after multiple attempts`);
-        // The quiz will fall back to sample questions when the user tries to take it
+
+        if (quizContent) {
+          // Store the quiz in the database
+          const { error: quizError } = await supabase
+            .from('quizzes')
+            .insert({
+              summary_id: summary.id,
+              mcq_json: quizContent
+            });
+
+          if (quizError) {
+            console.error('Error storing quiz:', quizError);
+          } else {
+            console.log(`RAG-enhanced quiz with ${questionCount} questions generated successfully`);
+          }
+        }
+      } catch (error) {
+        console.error('RAG quiz generation failed, using fallback:', error);
+        // Fallback to simple quiz generation
+        const quizContent = await generateQuizWithChatGPT(topic, goals, questionCount);
+        
+        if (quizContent) {
+          const { error: quizError } = await supabase
+            .from('quizzes')
+            .insert({
+              summary_id: summary.id,
+              mcq_json: quizContent
+            });
+
+          if (quizError) {
+            console.error('Error storing fallback quiz:', quizError);
+          } else {
+            console.log(`Fallback quiz generated successfully`);
+          }
+        }
       }
     } catch (error) {
       console.error('Error generating quiz for sprint:', error);
@@ -819,13 +934,26 @@ Return the response in this exact JSON format:
               </TouchableOpacity>
             )}
             {!isStillActive && (
-              <TouchableOpacity 
-                onPress={() => openQuizResults(item.id, item.topic)}
-                className="flex-row items-center mr-3"
-              >
-                <Feather name="help-circle" size={16} color="#A78BFA" />
-                <Text className="text-purple-400 text-sm ml-1">Quiz</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity 
+                  onPress={() => openQuizResults(item.id, item.topic)}
+                  className="flex-row items-center mr-3"
+                >
+                  <Feather name="help-circle" size={16} color="#A78BFA" />
+                  <Text className="text-purple-400 text-sm ml-1">Quiz</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setConceptMapSprintId(item.id);
+                    setConceptMapSprintTopic(item.topic);
+                    setShowConceptMapModal(true);
+                  }}
+                  className="flex-row items-center mr-3"
+                >
+                  <Feather name="map" size={16} color="#10B981" />
+                  <Text className="text-green-400 text-sm ml-1">Map</Text>
+                </TouchableOpacity>
+              </>
             )}
             <TouchableOpacity 
               onPress={() => router.push(`/(modals)/chat?circleId=${item.circle_id}`)}
@@ -945,6 +1073,83 @@ Return the response in this exact JSON format:
               <Text className="text-gray-500 text-sm mt-2 text-center">
                 Start a sprint in one of your circles below
               </Text>
+            </View>
+          )}
+        </View>
+
+        {/* AI Topic Suggestion Section */}
+        <View className="border-t border-gray-800">
+          <View className="p-4 pb-2">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-white text-lg font-semibold">AI Study Suggestion</Text>
+              <TouchableOpacity 
+                onPress={fetchNextTopicSuggestion}
+                disabled={loadingSuggestion}
+                className="flex-row items-center"
+              >
+                <Feather 
+                  name={loadingSuggestion ? "loader" : "refresh-cw"} 
+                  size={16} 
+                  color="#A78BFA" 
+                  style={{ marginRight: 4 }}
+                />
+                <Text className="text-purple-400 text-sm">
+                  {loadingSuggestion ? 'Generating...' : 'Get Suggestion'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {nextTopicSuggestion ? (
+            <View className="mx-4 mb-4 bg-gray-900 rounded-lg p-4 border border-purple-500/20">
+              <View className="flex-row items-start justify-between mb-2">
+                <View className="flex-1">
+                  <Text className="text-white font-semibold text-lg mb-1">
+                    {nextTopicSuggestion.topic}
+                  </Text>
+                  <Text className="text-gray-300 text-sm mb-2">
+                    {nextTopicSuggestion.reason}
+                  </Text>
+                  <View className="flex-row items-center space-x-4">
+                    <View className="flex-row items-center">
+                      <Feather name="clock" size={12} color="#9CA3AF" />
+                      <Text className="text-gray-400 text-xs ml-1">
+                        {nextTopicSuggestion.estimated_duration} min
+                      </Text>
+                    </View>
+                    <View className="flex-row items-center">
+                      <Feather name="trending-up" size={12} color="#9CA3AF" />
+                      <Text className="text-gray-400 text-xs ml-1 capitalize">
+                        {nextTopicSuggestion.difficulty}
+                      </Text>
+                    </View>
+                  </View>
+                  {nextTopicSuggestion.tags && nextTopicSuggestion.tags.length > 0 && (
+                    <View className="flex-row flex-wrap mt-2">
+                      {nextTopicSuggestion.tags.slice(0, 3).map((tag: string, index: number) => (
+                        <View key={index} className="bg-purple-500/20 rounded-full px-2 py-1 mr-2 mb-1">
+                          <Text className="text-purple-300 text-xs">#{tag}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <TouchableOpacity 
+                  onPress={useTopicSuggestion}
+                  className="bg-purple-600 rounded-lg px-4 py-2 ml-3"
+                >
+                  <Text className="text-white text-sm font-medium">Use This</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View className="mx-4 mb-4 bg-gray-900 rounded-lg p-4 border border-gray-700 border-dashed">
+              <View className="flex-row items-center justify-center">
+                <Feather name="zap" size={20} color="#9CA3AF" style={{ marginRight: 8 }} />
+                <Text className="text-gray-400 text-sm">
+                  Get AI-powered study suggestions based on your history
+                </Text>
+              </View>
             </View>
           )}
         </View>
@@ -1152,6 +1357,14 @@ Return the response in this exact JSON format:
         onClose={() => setShowQuizResultsModal(false)}
         sprintId={resultsSprintId}
         sprintTopic={resultsSprintTopic}
+      />
+
+      {/* Concept Map Modal */}
+      <ConceptMapModal
+        visible={showConceptMapModal}
+        onClose={() => setShowConceptMapModal(false)}
+        sprintId={conceptMapSprintId}
+        sprintTopic={conceptMapSprintTopic}
       />
     </SafeAreaView>
     </GestureHandlerRootView>

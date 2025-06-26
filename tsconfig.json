@@ -1,21 +1,27 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "target": "es2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
     "strict": true,
     "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+      "@/*": ["./src/*"]
+    },
+    "types": ["nativewind/types"]
   },
   "include": [
+    "nativewind-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts",
-    "nativewind-env.d.ts"
+    "expo-env.d.ts"
   ],
-  "exclude": [
-    "supabase/functions/**"
-  ]
+  "exclude": ["node_modules"]
 }
