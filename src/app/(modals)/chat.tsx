@@ -899,6 +899,7 @@ export default function ChatScreen() {
         setShowEmojiPicker(false);
       }}
       open={showEmojiPicker}
+      enableSearchBar
       onClose={() => setShowEmojiPicker(false)}
     />
   )
