@@ -68,7 +68,6 @@ serve(async (req) => {
             errors: [deleteError]
           };
         } else {
-          console.log(`Successfully deleted ${paths.length} files from ${bucket}`);
           results[bucket] = {
             deleted: paths.length,
             errors: []

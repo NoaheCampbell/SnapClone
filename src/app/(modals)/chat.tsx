@@ -179,14 +179,111 @@ export default function ChatScreen() {
   const [participantAvatars, setParticipantAvatars] = useState<Record<string, string[]>>({})
   const [threadNewMessage, setThreadNewMessage] = useState('')
   const [sendingThreadMessage, setSendingThreadMessage] = useState(false)
+  const messagesRef = useRef<Message[]>([])
+
+  // Keep messagesRef in sync with messages state
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
+
+  // Add function to fetch participant avatars (moved up to be accessible in useEffect)
+  const fetchParticipantAvatars = async (sprintId: string) => {
+    if (participantAvatars[sprintId]) return participantAvatars[sprintId];
+    
+    try {
+      // First get participant user_ids
+      const { data: participants, error: partError } = await supabase
+        .from('sprint_participants')
+        .select('user_id')
+        .eq('sprint_id', sprintId)
+        .limit(3); // Only fetch first 3 for display
+        
+      if (partError) {
+        console.error('[fetchParticipantAvatars] participant error:', partError);
+        return [];
+      }
+      
+      if (!participants || participants.length === 0) {
+        return [];
+      }
+      
+      // Then get their profiles
+      const userIds = participants.map(p => p.user_id);
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_id, username, avatar_url')
+        .in('user_id', userIds);
+        
+      if (profileError) {
+        console.error('[fetchParticipantAvatars] profile error:', profileError);
+        return [];
+      }
+       
+      const avatars = (profiles || []).map((p: any) => {
+        const avatar = p.avatar_url;
+        return avatar;
+      }).filter(Boolean);
+      
+      setParticipantAvatars(prev => ({
+        ...prev,
+        [sprintId]: avatars
+      }));
+      
+      return avatars;
+    } catch (error) {
+      console.error('Error fetching participant avatars:', error);
+      return [];
+    }
+  };
 
     useEffect(() => {
     if (channelId) {
       loadMessages()
       loadChatInfo()
+      
+      // Set up a periodic check for thread updates (to catch any missed real-time updates)
+      const threadUpdateInterval = setInterval(async () => {
+        // Get current messages from ref to avoid closure issues
+        const currentMessages = messagesRef.current;
+        
+        // Only check messages that have sprint_id (potential threads)
+        const threadMessages = currentMessages.filter(m => m.sprint_id);
+        if (threadMessages.length === 0) return;
+        
+        try {
+          // Batch check for updated join counts
+          const { data: updatedMessages } = await supabase
+            .from('messages')
+            .select('id, join_count, updated_at')
+            .in('id', threadMessages.map(m => m.id));
+            
+          if (updatedMessages && updatedMessages.length > 0) {
+            // Check if any updates are actually needed
+            let hasChanges = false;
+            const updatesMap = new Map(updatedMessages.map(u => [u.id, u]));
+            
+            // Only update state if there are actual changes
+            setMessages(curr => {
+              const newMessages = curr.map(m => {
+                const updated = updatesMap.get(m.id);
+                if (updated && m.join_count !== updated.join_count) {
+                  hasChanges = true;
+                  return { ...m, join_count: updated.join_count, updated_at: updated.updated_at };
+                }
+                return m;
+              });
+              
+              // Return the same array reference if no changes to prevent re-render
+              return hasChanges ? newMessages : curr;
+            });
+          }
+        } catch (error) {
+          console.error('[Thread Update] Error checking for updates:', error);
+        }
+      }, 5000); // Check every 5 seconds
       
       const subscription = supabase
         .channel(`messages:${channelId}`)
@@ -325,20 +422,37 @@ export default function ChatScreen() {
             event: 'UPDATE',
             schema: 'public',
             table: 'messages',
+            filter: `circle_id=eq.${channelId}`
           },
-          (payload) => {
+          async (payload) => {
             const updated = payload.new as any;
+            const old = payload.old as any;
             
-            // Only update if this message belongs to our current chat/circle
-            if (updated.circle_id === channelId) {
-              setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
-              if (updated.join_count > 1 && updated.sprint_id) {
-                setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+            // Update the message in our state
+            setMessages(curr => curr.map(m => {
+              if (m.id === updated.id) {
+                // If join_count changed and we need to fetch updated sender info
+                if (updated.join_count !== old.join_count && updated.join_count > (m.join_count || 1)) {
+                  // Fetch updated participant avatars for this sprint
+                  if (updated.sprint_id) {
+                    fetchParticipantAvatars(updated.sprint_id);
+                  }
+                }
+                return { ...m, join_count: updated.join_count, updated_at: updated.updated_at };
               }
+              return m;
+            }));
+            
+            // Track joined sprints
+            if (updated.join_count > 1 && updated.sprint_id) {
+              setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
             }
           }
         )
-        .subscribe((status) => {
+        .subscribe((status, error) => {
+          if (error) {
+            console.error('Subscription error:', error);
+          }
           if (status === 'TIMED_OUT') {
             // Try to resubscribe after a timeout
             setTimeout(() => {
@@ -348,6 +462,7 @@ export default function ChatScreen() {
         })
 
       return () => {
+        clearInterval(threadUpdateInterval);
         supabase.removeChannel(subscription)
       }
     }
@@ -916,10 +1031,6 @@ export default function ChatScreen() {
     if (messages.length === 0 || loadingSuggestions) return
     
     const apiKey = await getOpenAIKey()
-    if (!apiKey) {
-      console.log('❌ No OpenAI API key available')
-      return
-    }
     
     setLoadingSuggestions(true)
     try {
@@ -1436,55 +1547,7 @@ export default function ChatScreen() {
     };
   }, [showThreadModal, threadRootMessage?.id]);
 
-  // Add function to fetch participant avatars
-  const fetchParticipantAvatars = async (sprintId: string) => {
-    if (participantAvatars[sprintId]) return participantAvatars[sprintId];
-    
-    try {
-      // First get participant user_ids
-      const { data: participants, error: partError } = await supabase
-        .from('sprint_participants')
-        .select('user_id')
-        .eq('sprint_id', sprintId)
-        .limit(3);
-        
-      if (partError) {
-        console.error('[fetchParticipantAvatars] participant error:', partError);
-        return [];
-      }
-      
-      if (!participants || participants.length === 0) {
-        return [];
-      }
-      
-      // Then get their profiles
-      const userIds = participants.map(p => p.user_id);
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('user_id, username, avatar_url')
-        .in('user_id', userIds);
-        
-      if (profileError) {
-        console.error('[fetchParticipantAvatars] profile error:', profileError);
-        return [];
-      }
-       
-      const avatars = (profiles || []).map((p: any) => {
-        const avatar = p.avatar_url;
-        return avatar;
-      }).filter(Boolean);
-      
-      setParticipantAvatars(prev => ({
-        ...prev,
-        [sprintId]: avatars
-      }));
-      
-      return avatars;
-    } catch (error) {
-      console.error('Error fetching participant avatars:', error);
-      return [];
-    }
-  };
+
 
   const sendThreadMessage = async () => {
     if (!threadNewMessage.trim() || sendingThreadMessage || !threadRootMessage) return;
@@ -1525,6 +1588,13 @@ export default function ChatScreen() {
       } else {
         // Update local thread root message
         setThreadRootMessage(prev => prev ? { ...prev, join_count: (prev.join_count || 1) + 1 } : null);
+        
+        // Also update the message in the main messages list
+        setMessages(curr => curr.map(m => 
+          m.id === threadRootMessage.id 
+            ? { ...m, join_count: (threadRootMessage.join_count || 1) + 1, updated_at: new Date().toISOString() }
+            : m
+        ));
       }
     } catch (error) {
       console.error('Error sending thread message:', error);
