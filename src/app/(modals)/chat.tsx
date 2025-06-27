@@ -68,6 +68,7 @@ interface Message {
   sender_id: string
   created_at: string
   sender_name: string
+  avatar_url?: string | null
   is_own_message: boolean
   media_type?: string
   reactions?: { emoji: string; count: number; reactedByMe: boolean }[]
@@ -182,10 +183,11 @@ export default function ChatScreen() {
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
 
-  useEffect(() => {
+    useEffect(() => {
     if (channelId) {
       loadMessages()
       loadChatInfo()
+      
       const subscription = supabase
         .channel(`messages:${channelId}`)
         .on(
@@ -193,27 +195,37 @@ export default function ChatScreen() {
           {
             event: 'INSERT',
             schema: 'public',
-            table: 'messages',
-            filter: `channel_id=eq.${channelId}`
+            table: 'messages'
           },
           async (payload) => {
             const newMessage = payload.new as any
-            // We need to get the sender's profile to display their name
+            
+            // Filter messages in the handler instead of in the subscription
+            const belongsToThisChat = newMessage.channel_id === channelId || newMessage.circle_id === channelId
+            if (!belongsToThisChat) {
+              return
+            }
+            
+            // We need to get the sender's profile to display their name and avatar
             const { data: profile } = await supabase
               .from('profiles')
-              .select('username')
+              .select('username, avatar_url')
               .eq('user_id', newMessage.sender_id)
               .single()
             
             const { data: { user } } = await supabase.auth.getUser()
 
             // Only emit root messages (thread_root_id null or equals id)
-            if (newMessage.thread_root_id && newMessage.thread_root_id !== newMessage.id) return;
+            if (newMessage.thread_root_id && newMessage.thread_root_id !== newMessage.id) {
+              return;
+            }
 
             setMessages(currentMessages => {
               // Check if message already exists to prevent duplicates
               const messageExists = currentMessages.some(m => m.id === newMessage.id)
-              if (messageExists) return currentMessages
+              if (messageExists) {
+                return currentMessages
+              }
               
               return [
                 ...currentMessages,
@@ -223,10 +235,10 @@ export default function ChatScreen() {
                   sender_id: newMessage.sender_id,
                   created_at: newMessage.created_at,
                   sender_name: profile?.username || 'Unknown',
+                  avatar_url: profile?.avatar_url,
                   is_own_message: newMessage.sender_id === (user?.id || ''),
                   media_url: newMessage.media_url,
                   sprint_id: newMessage.sprint_id,
-                  media_type: newMessage.media_type,
                   join_count: newMessage.join_count,
                 }
               ]
@@ -326,7 +338,14 @@ export default function ChatScreen() {
             }
           }
         )
-        .subscribe()
+        .subscribe((status) => {
+          if (status === 'TIMED_OUT') {
+            // Try to resubscribe after a timeout
+            setTimeout(() => {
+              subscription.subscribe()
+            }, 2000)
+          }
+        })
 
       return () => {
         supabase.removeChannel(subscription)
@@ -442,8 +461,22 @@ export default function ChatScreen() {
         throw error
       }
 
-      const rootMsgs = (data || []).filter((m: any) => !m.thread_root_id || m.thread_root_id === m.id)
-      setMessages(rootMsgs)
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      const processedMessages: Message[] = (data || []).map((msg: any) => ({
+        id: msg.id,
+        content: msg.content,
+        media_url: msg.media_url,
+        sprint_id: msg.sprint_id,
+        sender_id: msg.sender_id,
+        created_at: msg.created_at,
+        join_count: msg.join_count,
+        sender_name: msg.sender_name,
+        avatar_url: msg.avatar_url,
+        is_own_message: msg.sender_id === user?.id,
+      }))
+      
+      setMessages(processedMessages)
       
       // Load read receipts for messages
       if (data && data.length > 0) {
@@ -616,120 +649,233 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => (
     <View className={`mb-3 ${item.is_own_message ? 'items-end' : 'items-start'}`}>
-      <TouchableOpacity activeOpacity={0.8} onLongPress={() => openReactionPicker(item.id)}>
-        <View className={`max-w-[80%] p-3 rounded-2xl ${
-          item.is_own_message 
-            ? 'bg-blue-500 rounded-br-md' 
-            : 'bg-gray-700 rounded-bl-md'
-        }`}>
-          {!item.is_own_message && (
-            <Text className="text-gray-300 text-xs mb-1 font-semibold">
-              {item.sender_name}
-            </Text>
-          )}
-
-          {/* Media rendering */}
-          {item.media_url ? (
-            /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
-              <Video
-                source={{ uri: item.media_url }}
-                style={{ width: 200, height: 200 }}
-                useNativeControls
-                resizeMode={ResizeMode.CONTAIN}
+      {!item.is_own_message ? (
+        // Other user's message with avatar
+        <View className="flex-row items-start space-x-2 max-w-[85%]">
+          {/* Avatar */}
+          <View className="w-8 h-8 rounded-full overflow-hidden bg-gray-600 flex-shrink-0 mt-1">
+            {item.avatar_url ? (
+              <Image 
+                source={{ uri: item.avatar_url }} 
+                className="w-8 h-8 rounded-full"
+                resizeMode="cover"
               />
             ) : (
-              <View>
-                <Image
-                  source={{ uri: item.media_url }}
-                  style={{ width: 200, height: 200, borderRadius: 8 }}
-                />
-                {/* Sprint buttons positioned below the image */}
-                {item.sprint_id && (
-                  <View className="flex-row justify-center mt-2 items-center space-x-2">
-                    {!item.is_own_message && !joinedSprints.includes(item.sprint_id as string) && (
-                      <TouchableOpacity
-                        className="bg-blue-600 px-3 py-1.5 rounded-full"
-                        onPress={() => joinSprint(item.sprint_id as string, channelId as string)}
-                      >
-                        <Text className="text-white text-xs font-medium">Join Sprint</Text>
-                      </TouchableOpacity>
+              <Image 
+                source={require('../../../assets/images/avatar-placeholder.png')} 
+                className="w-8 h-8 rounded-full"
+                resizeMode="cover"
+              />
+            )}
+          </View>
+          
+          {/* Message Content */}
+          <View className="flex-1">
+            <TouchableOpacity activeOpacity={0.8} onLongPress={() => openReactionPicker(item.id)}>
+              <View className="bg-gray-700 rounded-2xl rounded-bl-md p-3">
+                <Text className="text-gray-300 text-xs mb-1 font-semibold">
+                  {item.sender_name}
+                </Text>
+
+                {/* Media rendering */}
+                {item.media_url ? (
+                  /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
+                    <Video
+                      source={{ uri: item.media_url }}
+                      style={{ width: 200, height: 200 }}
+                      useNativeControls
+                      resizeMode={ResizeMode.CONTAIN}
+                    />
+                  ) : (
+                    <View>
+                      <Image
+                        source={{ uri: item.media_url }}
+                        style={{ width: 200, height: 200, borderRadius: 8 }}
+                      />
+                      {/* Sprint buttons positioned below the image */}
+                      {item.sprint_id && (
+                        <View className="flex-row justify-center mt-2 items-center space-x-2">
+                          {!joinedSprints.includes(item.sprint_id as string) && (
+                            <TouchableOpacity
+                              className="bg-blue-600 px-3 py-1.5 rounded-full"
+                              onPress={() => joinSprint(item.sprint_id as string, channelId as string)}
+                            >
+                              <Text className="text-white text-xs font-medium">Join Sprint</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  )
+                ) : (
+                  <Text className="text-white text-base">
+                    {item.content}
+                  </Text>
+                )}
+                
+                {/* If sprint message without media (safety) add view button below */}
+                {!item.media_url && item.sprint_id && (
+                  <TouchableOpacity
+                    className="mt-2 bg-black/20 px-2 py-1 rounded"
+                    onPress={() => router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: item.sprint_id } })}
+                  >
+                    <Text className="text-white text-xs">View Sprint</Text>
+                  </TouchableOpacity>
+                )}
+                
+                <View className={`flex-row items-center justify-between ${item.sprint_id && item.media_url ? 'mt-2' : 'mt-1'}`}>
+                  <Text className="text-gray-400 text-xs">
+                    {formatTime(item.created_at)}
+                  </Text>
+                  <View className="flex-row items-center">
+                    {/* Thread counter badge */}
+                    {item.join_count && item.join_count > 1 && (
+                      <View className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
+                        <Text className="text-white text-xs">{item.join_count}</Text>
+                      </View>
                     )}
                   </View>
-                )}
-              </View>
-            )
-          ) : (
-            <Text className="text-white text-base">
-              {item.content}
-            </Text>
-          )}
-          {/* If sprint message without media (safety) add view button below */}
-          {!item.media_url && item.sprint_id && (
-            <TouchableOpacity
-              className="mt-2 bg-black/20 px-2 py-1 rounded"
-              onPress={() => router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: item.sprint_id } })}
-            >
-              <Text className="text-white text-xs">View Sprint</Text>
-            </TouchableOpacity>
-          )}
-          <View className={`flex-row items-center justify-between ${item.sprint_id && item.media_url ? 'mt-2' : 'mt-1'}`}>
-            <Text className={`text-xs ${
-              item.is_own_message ? 'text-blue-100' : 'text-gray-400'
-            }`}>
-              {formatTime(item.created_at)}
-            </Text>
-            <View className="flex-row items-center">
-              {/* Thread counter badge */}
-              {item.join_count && item.join_count > 1 && (
-                <View className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
-                  <Text className="text-white text-xs">{item.join_count}</Text>
                 </View>
-              )}
-              {item.is_own_message && (
+              </View>
+            </TouchableOpacity>
+
+            {/* Reactions bar */}
+            {reactionsMap[item.id] && (
+              <View className="flex-row mt-1 space-x-2">
+                {Array.from(new Set(reactionsMap[item.id].map(r => r.emoji))).map(e => {
+                  const list = reactionsMap[item.id].filter(r => r.emoji === e)
+                  return (
+                    <View key={e} className="flex-row items-center bg-black/20 px-1.5 py-0.5 rounded-full">
+                      <Text className="text-sm mr-1">{e}</Text>
+                      <Text className="text-xs text-white">{list.length}</Text>
+                    </View>
+                  )
+                })}
+              </View>
+            )}
+
+            {/* Thread opener (Discord-style) */}
+            {item.sprint_id && item.join_count && item.join_count > 1 && (
+              <TouchableOpacity
+                className="flex-row items-center mt-2 p-2 bg-gray-800/50 rounded-lg"
+                onPress={() => openThread(item)}
+              >
+                <AvatarStack 
+                  sprintId={item.sprint_id} 
+                  joinCount={item.join_count} 
+                  fetchAvatars={fetchParticipantAvatars}
+                />
+                <Text className="text-blue-400 text-sm font-medium">
+                  {item.join_count - 1} {item.join_count - 1 === 1 ? 'reply' : 'replies'}
+                </Text>
+                <Feather name="chevron-right" size={16} color="#60A5FA" style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      ) : (
+        // Own message (right-aligned, no avatar)
+        <TouchableOpacity activeOpacity={0.8} onLongPress={() => openReactionPicker(item.id)}>
+          <View className="max-w-[80%] p-3 rounded-2xl bg-blue-500 rounded-br-md">
+            {/* Media rendering */}
+            {item.media_url ? (
+              /\.(mp4|mov|webm)$/i.test(item.media_url) ? (
+                <Video
+                  source={{ uri: item.media_url }}
+                  style={{ width: 200, height: 200 }}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                />
+              ) : (
+                <View>
+                  <Image
+                    source={{ uri: item.media_url }}
+                    style={{ width: 200, height: 200, borderRadius: 8 }}
+                  />
+                  {/* Sprint buttons positioned below the image */}
+                  {item.sprint_id && (
+                    <View className="flex-row justify-center mt-2 items-center space-x-2">
+                      <TouchableOpacity
+                        className="mt-2 bg-black/20 px-2 py-1 rounded"
+                        onPress={() => router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: item.sprint_id } })}
+                      >
+                        <Text className="text-white text-xs">View Sprint</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )
+            ) : (
+              <Text className="text-white text-base">
+                {item.content}
+              </Text>
+            )}
+            
+            {/* If sprint message without media (safety) add view button below */}
+            {!item.media_url && item.sprint_id && (
+              <TouchableOpacity
+                className="mt-2 bg-black/20 px-2 py-1 rounded"
+                onPress={() => router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: item.sprint_id } })}
+              >
+                <Text className="text-white text-xs">View Sprint</Text>
+              </TouchableOpacity>
+            )}
+            
+            <View className={`flex-row items-center justify-between ${item.sprint_id && item.media_url ? 'mt-2' : 'mt-1'}`}>
+              <Text className="text-blue-100 text-xs">
+                {formatTime(item.created_at)}
+              </Text>
+              <View className="flex-row items-center">
+                {/* Thread counter badge */}
+                {item.join_count && item.join_count > 1 && (
+                  <View className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
+                    <Text className="text-white text-xs">{item.join_count}</Text>
+                  </View>
+                )}
                 <Feather
                   name={receipts[item.id]?.length ? 'check-circle' : 'check'}
                   size={14}
                   color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
                   style={{ marginLeft: 4 }}
                 />
-              )}
+              </View>
             </View>
+
+            {/* Reactions bar */}
+            {reactionsMap[item.id] && (
+              <View className="flex-row mt-1 space-x-2">
+                {Array.from(new Set(reactionsMap[item.id].map(r => r.emoji))).map(e => {
+                  const list = reactionsMap[item.id].filter(r => r.emoji === e)
+                  return (
+                    <View key={e} className="flex-row items-center bg-black/20 px-1.5 py-0.5 rounded-full">
+                      <Text className="text-sm mr-1">{e}</Text>
+                      <Text className="text-xs text-white">{list.length}</Text>
+                    </View>
+                  )
+                })}
+              </View>
+            )}
+
+            {/* Thread opener (Discord-style) */}
+            {item.sprint_id && item.join_count && item.join_count > 1 && (
+              <TouchableOpacity
+                className="flex-row items-center mt-2 p-2 bg-gray-800/50 rounded-lg"
+                onPress={() => openThread(item)}
+              >
+                <AvatarStack 
+                  sprintId={item.sprint_id} 
+                  joinCount={item.join_count} 
+                  fetchAvatars={fetchParticipantAvatars}
+                />
+                <Text className="text-blue-400 text-sm font-medium">
+                  {item.join_count - 1} {item.join_count - 1 === 1 ? 'reply' : 'replies'}
+                </Text>
+                <Feather name="chevron-right" size={16} color="#60A5FA" style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
+            )}
           </View>
-
-          {/* Reactions bar */}
-          {reactionsMap[item.id] && (
-            <View className="flex-row mt-1 space-x-2">
-              {Array.from(new Set(reactionsMap[item.id].map(r => r.emoji))).map(e => {
-                const list = reactionsMap[item.id].filter(r => r.emoji === e)
-                return (
-                  <View key={e} className="flex-row items-center bg-black/20 px-1.5 py-0.5 rounded-full">
-                    <Text className="text-sm mr-1">{e}</Text>
-                    <Text className="text-xs text-white">{list.length}</Text>
-                  </View>
-                )
-              })}
-            </View>
-          )}
-
-          {/* Thread opener (Discord-style) */}
-          {item.sprint_id && item.join_count && item.join_count > 1 && (
-            <TouchableOpacity
-              className="flex-row items-center mt-2 p-2 bg-gray-800/50 rounded-lg"
-              onPress={() => openThread(item)}
-            >
-              <AvatarStack 
-                sprintId={item.sprint_id} 
-                joinCount={item.join_count} 
-                fetchAvatars={fetchParticipantAvatars}
-              />
-              <Text className="text-blue-400 text-sm font-medium">
-                {item.join_count - 1} {item.join_count - 1 === 1 ? 'reply' : 'replies'}
-              </Text>
-              <Feather name="chevron-right" size={16} color="#60A5FA" style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
-          )}
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      )}
     </View>
   )
 
@@ -1217,7 +1363,7 @@ export default function ChatScreen() {
         .from('messages')
         .select(`
           id, content, media_url, sprint_id, sender_id, created_at, join_count, thread_root_id,
-          profiles!messages_sender_id_fkey(username)
+          profiles!messages_sender_id_fkey(username, avatar_url)
         `)
         .or(`id.eq.${rootMessage.id},thread_root_id.eq.${rootMessage.id}`)
         .order('created_at', { ascending: true });
@@ -1235,6 +1381,7 @@ export default function ChatScreen() {
         created_at: msg.created_at,
         join_count: msg.join_count,
         sender_name: msg.profiles.username,
+        avatar_url: msg.profiles.avatar_url,
         is_own_message: msg.sender_id === user?.id,
       }));
       
@@ -1266,7 +1413,7 @@ export default function ChatScreen() {
           // Get sender profile
           const { data: profile } = await supabase
             .from('profiles')
-            .select('username')
+            .select('username, avatar_url')
             .eq('user_id', newMessage.sender_id)
             .single();
             
@@ -1281,6 +1428,7 @@ export default function ChatScreen() {
             created_at: newMessage.created_at,
             join_count: newMessage.join_count,
             sender_name: profile?.username || 'Unknown',
+            avatar_url: profile?.avatar_url,
             is_own_message: newMessage.sender_id === user?.id,
           };
           
@@ -1664,32 +1812,66 @@ export default function ChatScreen() {
               data={threadMessages}
               renderItem={({ item }) => (
                 <View className={`mb-3 mx-4 ${item.is_own_message ? 'items-end' : 'items-start'}`}>
-                  <View className={`max-w-[80%] p-3 rounded-2xl ${
-                    item.is_own_message 
-                      ? 'bg-blue-500 rounded-br-md' 
-                      : 'bg-gray-700 rounded-bl-md'
-                  }`}>
-                    {!item.is_own_message && (
-                      <Text className="text-gray-300 text-xs mb-1 font-semibold">
-                        {item.sender_name}
+                  {!item.is_own_message ? (
+                    // Other user's message with avatar
+                    <View className="flex-row items-start space-x-2 max-w-[85%]">
+                      {/* Avatar */}
+                      <View className="w-8 h-8 rounded-full overflow-hidden bg-gray-600 flex-shrink-0 mt-1">
+                        {item.avatar_url ? (
+                          <Image 
+                            source={{ uri: item.avatar_url }} 
+                            className="w-8 h-8 rounded-full"
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Image 
+                            source={require('../../../assets/images/avatar-placeholder.png')} 
+                            className="w-8 h-8 rounded-full"
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                      
+                      {/* Message Content */}
+                      <View className="flex-1">
+                        <View className="bg-gray-700 rounded-2xl rounded-bl-md p-3">
+                          <Text className="text-gray-300 text-xs mb-1 font-semibold">
+                            {item.sender_name}
+                          </Text>
+                          {item.media_url ? (
+                            <Image
+                              source={{ uri: item.media_url }}
+                              style={{ width: 200, height: 200, borderRadius: 8 }}
+                            />
+                          ) : (
+                            <Text className="text-white text-base">
+                              {item.content}
+                            </Text>
+                          )}
+                          <Text className="text-gray-400 text-xs mt-1">
+                            {formatTime(item.created_at)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    // Own message (right-aligned, no avatar)
+                    <View className="max-w-[80%] p-3 rounded-2xl bg-blue-500 rounded-br-md">
+                      {item.media_url ? (
+                        <Image
+                          source={{ uri: item.media_url }}
+                          style={{ width: 200, height: 200, borderRadius: 8 }}
+                        />
+                      ) : (
+                        <Text className="text-white text-base">
+                          {item.content}
+                        </Text>
+                      )}
+                      <Text className="text-blue-100 text-xs mt-1">
+                        {formatTime(item.created_at)}
                       </Text>
-                    )}
-                    {item.media_url ? (
-                      <Image
-                        source={{ uri: item.media_url }}
-                        style={{ width: 200, height: 200, borderRadius: 8 }}
-                      />
-                    ) : (
-                      <Text className="text-white text-base">
-                        {item.content}
-                      </Text>
-                    )}
-                    <Text className={`text-xs mt-1 ${
-                      item.is_own_message ? 'text-blue-100' : 'text-gray-400'
-                    }`}>
-                      {formatTime(item.created_at)}
-                    </Text>
-                  </View>
+                    </View>
+                  )}
                 </View>
               )}
               keyExtractor={(item) => item.id.toString()}

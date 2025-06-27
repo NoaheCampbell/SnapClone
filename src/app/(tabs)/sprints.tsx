@@ -524,7 +524,9 @@ export default function SprintsTab() {
           p_media_url: publicPhotoUrl
         });
 
-      if (messageError) console.error('Error sending sprint notification:', messageError);
+      if (messageError) {
+        console.error('Error sending sprint notification:', messageError);
+      }
 
       // Generate quiz questions in the background
       generateQuizForSprint(sprint.id, sprintTopic, sprintGoals, quizQuestionCount);

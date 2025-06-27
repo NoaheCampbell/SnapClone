@@ -12,6 +12,7 @@ set search_path = public
 as $$
 declare
     v_root_id bigint;
+    v_new_id bigint;
 begin
   -- look for an existing root message for this sprint in the circle
   select id into v_root_id
@@ -31,15 +32,15 @@ begin
         updated_at = now()
     where id = v_root_id;
   else
-    -- first announcement → insert and make it the root of its own thread
-    insert into public.messages (circle_id, sender_id, sprint_id, content, media_url)
-    values (p_circle_id, p_user_id, p_sprint_id, p_content, p_media_url)
-    returning id into v_root_id;
-
-    update public.messages
-    set thread_root_id = v_root_id,
-        join_count     = 1
-    where id = v_root_id;
+    -- first announcement → insert and immediately set as root of its own thread
+    insert into public.messages (circle_id, sender_id, sprint_id, content, media_url, join_count)
+    values (p_circle_id, p_user_id, p_sprint_id, p_content, p_media_url, 1)
+    returning id into v_new_id;
+    
+    -- Update the thread_root_id to point to itself
+    update public.messages 
+    set thread_root_id = v_new_id
+    where id = v_new_id;
   end if;
 end;
 $$; 
