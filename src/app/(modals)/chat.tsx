@@ -99,6 +99,42 @@ const emojiDarkTheme = {
   }
 } as const;
 
+// Add AvatarStack component before main component
+const AvatarStack = ({ sprintId, joinCount, fetchAvatars }: { 
+  sprintId: string; 
+  joinCount: number; 
+  fetchAvatars: (id: string) => Promise<string[]>;
+}) => {
+  const [avatars, setAvatars] = useState<string[]>([]);
+  
+  useEffect(() => {
+    fetchAvatars(sprintId).then(setAvatars);
+  }, [sprintId]);
+  
+  const displayAvatars = avatars.slice(0, 3);
+  
+  return (
+    <View className="flex-row -space-x-2 mr-2">
+      {Array.from({ length: Math.min(joinCount, 3) }).map((_, i) => {
+        const avatar = displayAvatars[i];
+        return avatar ? (
+          <Image
+            key={i}
+            source={{ uri: avatar }}
+            className="w-6 h-6 rounded-full border-2 border-gray-900"
+          />
+        ) : (
+          <Image
+            key={i}
+            source={require('../../../assets/images/avatar-placeholder.png')}
+            className="w-6 h-6 rounded-full border-2 border-gray-900"
+          />
+        );
+      })}
+    </View>
+  );
+};
+
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ circleId?: string; channelId?: string }>()
   const channelId = (params.circleId ?? params.channelId) as string | undefined
@@ -139,6 +175,9 @@ export default function ChatScreen() {
     originalSprint: any;
     username: string;
   } | null>(null)
+  const [participantAvatars, setParticipantAvatars] = useState<Record<string, string[]>>({})
+  const [threadNewMessage, setThreadNewMessage] = useState('')
+  const [sendingThreadMessage, setSendingThreadMessage] = useState(false)
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
@@ -274,28 +313,17 @@ export default function ChatScreen() {
             event: 'UPDATE',
             schema: 'public',
             table: 'messages',
-            filter: `channel_id=eq.${channelId}`
           },
           (payload) => {
             const updated = payload.new as any;
-            console.log('[message UPDATE]', updated.id, 'join_count', updated.join_count);
-            setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
-            if (updated.join_count > 1 && updated.sprint_id) {
-              setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+            
+            // Only update if this message belongs to our current chat/circle
+            if (updated.channel_id === channelId || updated.circle_id === channelId) {
+              setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
+              if (updated.join_count > 1 && updated.sprint_id) {
+                setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+              }
             }
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'messages',
-            filter: `circle_id=eq.${channelId}`
-          },
-          (payload) => {
-            const updated = payload.new as any;
-            setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
           }
         )
         .subscribe()
@@ -626,15 +654,6 @@ export default function ChatScreen() {
                         <Text className="text-white text-xs font-medium">Join Sprint</Text>
                       </TouchableOpacity>
                     )}
-                    {item.join_count && item.join_count > 1 && (
-                      <TouchableOpacity 
-                        className="bg-blue-500/90 px-2 py-0.5 rounded-full flex-row items-center"
-                        onPress={() => openThread(item)}
-                      >
-                        <Feather name="message-square" size={12} color="white" style={{ marginRight: 4 }} />
-                        <Text className="text-white text-xs">{item.join_count}</Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 )}
               </View>
@@ -659,14 +678,22 @@ export default function ChatScreen() {
             }`}>
               {formatTime(item.created_at)}
             </Text>
-            {item.is_own_message && (
-              <Feather
-                name={receipts[item.id]?.length ? 'check-circle' : 'check'}
-                size={14}
-                color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
-                style={{ marginLeft: 4 }}
-              />
-            )}
+            <View className="flex-row items-center">
+              {/* Thread counter badge */}
+              {item.join_count && item.join_count > 1 && (
+                <View className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
+                  <Text className="text-white text-xs">{item.join_count}</Text>
+                </View>
+              )}
+              {item.is_own_message && (
+                <Feather
+                  name={receipts[item.id]?.length ? 'check-circle' : 'check'}
+                  size={14}
+                  color={receipts[item.id]?.length ? '#4ADE80' : '#D1D5DB'}
+                  style={{ marginLeft: 4 }}
+                />
+              )}
+            </View>
           </View>
 
           {/* Reactions bar */}
@@ -682,6 +709,24 @@ export default function ChatScreen() {
                 )
               })}
             </View>
+          )}
+
+          {/* Thread opener (Discord-style) */}
+          {item.sprint_id && item.join_count && item.join_count > 1 && (
+            <TouchableOpacity
+              className="flex-row items-center mt-2 p-2 bg-gray-800/50 rounded-lg"
+              onPress={() => openThread(item)}
+            >
+              <AvatarStack 
+                sprintId={item.sprint_id} 
+                joinCount={item.join_count} 
+                fetchAvatars={fetchParticipantAvatars}
+              />
+              <Text className="text-blue-400 text-sm font-medium">
+                {item.join_count - 1} {item.join_count - 1 === 1 ? 'reply' : 'replies'}
+              </Text>
+              <Feather name="chevron-right" size={16} color="#60A5FA" style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
           )}
         </View>
       </TouchableOpacity>
@@ -1010,7 +1055,6 @@ export default function ChatScreen() {
         return;
       }
 
-      console.log('[joinSprint] inserting participant');
       // Insert participant row (first time join)
       const { error: partErr } = await supabase
         .from('sprint_participants')
@@ -1020,8 +1064,6 @@ export default function ChatScreen() {
         console.error('Error inserting sprint participant:', partErr);
         return;
       }
-
-      console.log('[joinSprint] participant row ok');
 
       // Get original sprint details to create joiner's sprint
       const { data: originalSprint } = await supabase
@@ -1066,8 +1108,6 @@ export default function ChatScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      console.log('[handleJoinPhoto] creating joiner sprint with photo');
-      
       // Upload photo first
       const uploadedPhotoUrl = await uploadJoinPhoto(photoUrl);
       
@@ -1093,10 +1133,7 @@ export default function ChatScreen() {
         return;
       }
 
-      console.log('[handleJoinPhoto] joiner sprint created:', joinerSprint.id);
-
       // Send threaded join message with photo
-      console.log('[handleJoinPhoto] calling upsert_sprint_message');
       const { error: rpcError } = await supabase.rpc('upsert_sprint_message', {
         p_circle_id: joinSprintData.circleId,
         p_user_id: user.id,
@@ -1108,7 +1145,6 @@ export default function ChatScreen() {
       if (rpcError) {
         console.error('[handleJoinPhoto] RPC error:', rpcError);
       } else {
-        console.log('[handleJoinPhoto] RPC success');
         // Optimistically bump counter locally
         setMessages(curr => curr.map(m => m.sprint_id === joinSprintData.sprintId ? { ...m, join_count: (m.join_count || 1) + 1 } : m));
         setJoinedSprints(prev => [...prev, joinSprintData.sprintId]);
@@ -1171,8 +1207,6 @@ export default function ChatScreen() {
   const openThread = async (rootMessage: Message) => {
     if (!rootMessage.sprint_id) return;
     
-    console.log('[openThread] rootMessage:', rootMessage.id, 'sprint_id:', rootMessage.sprint_id);
-    
     setLoadingThread(true);
     setThreadRootMessage(rootMessage);
     setShowThreadModal(true);
@@ -1190,8 +1224,6 @@ export default function ChatScreen() {
         
       if (error) throw error;
       
-      console.log('[openThread] fetched messages:', data?.length, data?.map(m => ({ id: m.id, content: m.content, thread_root_id: m.thread_root_id })));
-      
       const { data: { user } } = await supabase.auth.getUser();
       
       const processedMessages: Message[] = (data || []).map((msg: any) => ({
@@ -1206,13 +1238,157 @@ export default function ChatScreen() {
         is_own_message: msg.sender_id === user?.id,
       }));
       
-      console.log('[openThread] processed messages:', processedMessages.length, processedMessages.map(m => ({ id: m.id, content: m.content, media_url: !!m.media_url })));
-      
       setThreadMessages(processedMessages);
     } catch (error) {
       console.error('Error loading thread:', error);
     } finally {
       setLoadingThread(false);
+    }
+  };
+
+  // Add useEffect for thread subscription
+  useEffect(() => {
+    if (!showThreadModal || !threadRootMessage) return;
+    
+    const threadSubscription = supabase
+      .channel(`thread:${threadRootMessage.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `thread_root_id=eq.${threadRootMessage.id}`
+        },
+        async (payload) => {
+          const newMessage = payload.new as any;
+          
+          // Get sender profile
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('username')
+            .eq('user_id', newMessage.sender_id)
+            .single();
+            
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          const processedMessage: Message = {
+            id: newMessage.id,
+            content: newMessage.content,
+            media_url: newMessage.media_url,
+            sprint_id: newMessage.sprint_id,
+            sender_id: newMessage.sender_id,
+            created_at: newMessage.created_at,
+            join_count: newMessage.join_count,
+            sender_name: profile?.username || 'Unknown',
+            is_own_message: newMessage.sender_id === user?.id,
+          };
+          
+          setThreadMessages(prev => [...prev, processedMessage]);
+        }
+      )
+      .subscribe();
+      
+    return () => {
+      threadSubscription.unsubscribe();
+    };
+  }, [showThreadModal, threadRootMessage?.id]);
+
+  // Add function to fetch participant avatars
+  const fetchParticipantAvatars = async (sprintId: string) => {
+    if (participantAvatars[sprintId]) return participantAvatars[sprintId];
+    
+    try {
+      // First get participant user_ids
+      const { data: participants, error: partError } = await supabase
+        .from('sprint_participants')
+        .select('user_id')
+        .eq('sprint_id', sprintId)
+        .limit(3); // Only fetch first 3 for display
+        
+      if (partError) {
+        console.error('[fetchParticipantAvatars] participant error:', partError);
+        return [];
+      }
+      
+      if (!participants || participants.length === 0) {
+        return [];
+      }
+      
+      // Then get their profiles
+      const userIds = participants.map(p => p.user_id);
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_id, username, avatar_url')
+        .in('user_id', userIds);
+        
+      if (profileError) {
+        console.error('[fetchParticipantAvatars] profile error:', profileError);
+        return [];
+      }
+       
+      const avatars = (profiles || []).map((p: any) => {
+        const avatar = p.avatar_url;
+        return avatar;
+      }).filter(Boolean);
+      
+      setParticipantAvatars(prev => ({
+        ...prev,
+        [sprintId]: avatars
+      }));
+      
+      return avatars;
+    } catch (error) {
+      console.error('Error fetching participant avatars:', error);
+      return [];
+    }
+  };
+
+  const sendThreadMessage = async () => {
+    if (!threadNewMessage.trim() || sendingThreadMessage || !threadRootMessage) return;
+    
+    const messageText = threadNewMessage.trim();
+    setThreadNewMessage(''); // Clear input immediately
+    
+    try {
+      setSendingThreadMessage(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          circle_id: channelId,
+          sender_id: user.id,
+          content: messageText,
+          thread_root_id: threadRootMessage.id
+        });
+        
+      if (error) {
+        setThreadNewMessage(messageText); // Restore on error
+        throw error;
+      }
+
+      // Update root message join_count
+      const { error: updateError } = await supabase
+        .from('messages')
+        .update({ 
+          join_count: (threadRootMessage.join_count || 1) + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', threadRootMessage.id);
+        
+      if (updateError) {
+        console.error('Error updating thread count:', updateError);
+      } else {
+        // Update local thread root message
+        setThreadRootMessage(prev => prev ? { ...prev, join_count: (prev.join_count || 1) + 1 } : null);
+      }
+    } catch (error) {
+      console.error('Error sending thread message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+    } finally {
+      setSendingThreadMessage(false);
     }
   };
 
@@ -1466,7 +1642,12 @@ export default function ChatScreen() {
         <SafeAreaView className="flex-1 bg-black">
           {/* Thread Header */}
           <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
-            <TouchableOpacity onPress={() => setShowThreadModal(false)}>
+            <TouchableOpacity onPress={() => {
+              setShowThreadModal(false);
+              setThreadMessages([]);
+              setThreadRootMessage(null);
+              setThreadNewMessage('');
+            }}>
               <Feather name="x" size={24} color="white" />
             </TouchableOpacity>
             <Text className="text-white text-lg font-semibold">Thread</Text>
@@ -1516,6 +1697,42 @@ export default function ChatScreen() {
               contentContainerStyle={{ paddingVertical: 16 }}
             />
           )}
+
+          {/* Thread Message Input */}
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={keyboardOffset}
+            className="border-t border-gray-800"
+          >
+            <View className="flex-row items-center p-4 space-x-3">
+              <View className="flex-1">
+                <TextInput
+                  value={threadNewMessage}
+                  onChangeText={setThreadNewMessage}
+                  placeholder="Reply to thread..."
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-800 text-white rounded-full px-4 py-3 max-h-20"
+                  multiline
+                  onSubmitEditing={sendThreadMessage}
+                  blurOnSubmit={false}
+                />
+              </View>
+              
+              <TouchableOpacity 
+                onPress={sendThreadMessage}
+                disabled={!threadNewMessage.trim() || sendingThreadMessage}
+                className={`w-10 h-10 rounded-full items-center justify-center ${
+                  threadNewMessage.trim() && !sendingThreadMessage ? 'bg-blue-500' : 'bg-gray-600'
+                }`}
+              >
+                <Feather 
+                  name="send" 
+                  size={18} 
+                  color="white" 
+                />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
