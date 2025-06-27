@@ -61,12 +61,8 @@ serve(async (req) => {
     const summaryTags = userSprints.flatMap(s => s.summaries?.tags || [])
     const allUserTags = [...userTags, ...summaryTags].filter(Boolean)
 
-    console.log('User sprint topics:', userTopics)
-    console.log('User tags:', allUserTags)
-
     // Create a representative embedding for the user's interests
     const userInterestsText = `${userTopics.join(' ')} ${allUserTags.join(' ')}`
-    console.log('User interests text for embedding:', userInterestsText)
     
     let userEmbedding = null
     if (userInterestsText.trim()) {
@@ -116,9 +112,6 @@ serve(async (req) => {
     if (publicCirclesError) {
       throw publicCirclesError
     }
-
-    console.log('Found public circles (excluding user circles):', publicCircles?.length || 0)
-    console.log('Public circles:', publicCircles?.map(c => ({ id: c.id, name: c.name })))
 
     // Calculate similarity scores for each circle
     const circleScores = await Promise.all(
@@ -260,9 +253,6 @@ serve(async (req) => {
       })
     )
 
-    // Sort by score and take top suggestions
-    console.log('Circle scores before filtering:', circleScores.map(c => ({ name: c.name, score: c.score, reasons: c.reasons })))
-    
     // If no circles have scores > 0, just return some popular public circles
     let topSuggestions = circleScores
       .filter(circle => circle.score > 0)
@@ -280,7 +270,6 @@ serve(async (req) => {
 
     // Fallback: if no scored suggestions, return some active public circles
     if (topSuggestions.length === 0) {
-      console.log('No scored suggestions found, returning fallback suggestions')
       topSuggestions = circleScores
         .filter(circle => circle.member_count >= 1) // At least 1 member
         .sort((a, b) => b.member_count - a.member_count) // Sort by member count
@@ -295,8 +284,6 @@ serve(async (req) => {
           similarity_reason: 'Popular public circle'
         }))
     }
-
-    console.log('Top suggestions after filtering:', topSuggestions)
 
     return new Response(
       JSON.stringify({ 

@@ -138,8 +138,8 @@ const AvatarStack = ({ sprintId, joinCount, fetchAvatars }: {
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<{ circleId?: string; channelId?: string }>()
+  // All chats are now circles, channelId is kept for backward compatibility
   const channelId = (params.circleId ?? params.channelId) as string | undefined
-  const isCircle = !!params.circleId
   const insets = useSafeAreaInsets()
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
@@ -201,7 +201,7 @@ export default function ChatScreen() {
             const newMessage = payload.new as any
             
             // Filter messages in the handler instead of in the subscription
-            const belongsToThisChat = newMessage.channel_id === channelId || newMessage.circle_id === channelId
+            const belongsToThisChat = newMessage.circle_id === channelId
             if (!belongsToThisChat) {
               return
             }
@@ -330,7 +330,7 @@ export default function ChatScreen() {
             const updated = payload.new as any;
             
             // Only update if this message belongs to our current chat/circle
-            if (updated.channel_id === channelId || updated.circle_id === channelId) {
+            if (updated.circle_id === channelId) {
               setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
               if (updated.join_count > 1 && updated.sprint_id) {
                 setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
@@ -405,9 +405,8 @@ export default function ChatScreen() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const functionName = isCircle ? 'get_circle_details' : 'get_chat_details'
-      const parameterName = isCircle ? 'p_circle_id' : 'p_channel_id'
-      const { data, error } = await supabase.rpc(functionName, { [parameterName]: channelId })
+      // Always use circle details now (no more legacy channels)
+      const { data, error } = await supabase.rpc('get_circle_details', { p_circle_id: channelId })
 
       if (error) {
         // Check if the error is due to access denied (user no longer in chat)
@@ -417,23 +416,17 @@ export default function ChatScreen() {
         throw error
       }
 
-      if (isCircle) {
-        // For circles, data is a jsonb object with members array
-        const members = data?.members || []
-        const otherMembers = members.filter((m: any) => m.user_id !== user.id)
-        setChatTitle(otherMembers.map((m: any) => m.username).join(', ') || 'Circle')
+      // For circles, data is a jsonb object with members array
+      const members = data?.members || []
+      const otherMembers = members.filter((m: any) => m.user_id !== user.id)
+      
+      // For DM circles (2 members), show the other person's name
+      // For group circles, show all other member names
+      if (members.length === 2) {
+        const otherMember = otherMembers[0]
+        setChatTitle(otherMember?.username || 'Chat')
       } else {
-        // For old channels, use the original format
-        const { is_group, participants } = data
-        if (is_group) {
-          // Filter out current user from the title
-          const otherParticipants = participants?.filter((p: any) => p.user_id !== user.id) || []
-          setChatTitle(otherParticipants.map((p: any) => p.username).join(', ') || 'Group')
-        } else {
-          // For 1-on-1, show the other person's name
-          const otherParticipant = participants?.find((p: any) => p.user_id !== user.id)
-          setChatTitle(otherParticipant?.username || 'Chat')
-        }
+        setChatTitle(otherMembers.map((m: any) => m.username).join(', ') || 'Circle')
       }
     } catch (error) {
       console.error('Error loading chat info:', error)
@@ -443,7 +436,8 @@ export default function ChatScreen() {
 
   const loadMessages = async () => {
     try {
-      const { data, error } = await supabase.rpc('get_chat_messages', { p_channel_id: channelId })
+      // Always use circle messages now
+      const { data, error } = await supabase.rpc('get_circle_messages', { p_circle_id: channelId })
       
       if (error) {
         // Check if the error is due to access denied (user no longer in chat)
@@ -527,7 +521,7 @@ export default function ChatScreen() {
         const { data, error } = await supabase
           .from('messages')
           .insert({
-            channel_id: channelId,
+            circle_id: channelId,
             sender_id: user.id,
             content: messageText,
           })
@@ -536,7 +530,7 @@ export default function ChatScreen() {
         if (error) {
           // Restore message text on error
           setNewMessage(messageText)
-          // Check if error is due to RLS policy (user not in channel)
+          // Check if error is due to RLS policy (user not in circle)
           if (error.message.includes('policy') || error.message.includes('denied')) {
             Alert.alert(
               'Unable to Send',
@@ -591,7 +585,7 @@ export default function ChatScreen() {
     const { error: insertError } = await supabase
       .from('messages')
       .insert({
-        channel_id: channelId,
+        circle_id: channelId,
         sender_id: userId,
         media_url: data.publicUrl,
       })
@@ -879,51 +873,7 @@ export default function ChatScreen() {
     </View>
   )
 
-  // -----------------------------------------------------------------
-  // Leave / delete chat (remove current user from channel)
-  // -----------------------------------------------------------------
-  const leaveChat = async () => {
-    try {
-      const { data: auth } = await supabase.auth.getUser()
-      if (!auth.user) return
-
-      const { error } = await supabase
-        .from('circle_members')
-        .delete()
-        .eq('circle_id', channelId)
-        .eq('user_id', auth.user.id)
-
-      if (error) {
-        console.error('Error leaving circle:', error)
-        Alert.alert('Error', 'Unable to leave circle. Please try again.')
-        return
-      }
-
-      // Broadcast an event to notify other parts of the app that the user left a circle
-      supabase.channel('circle-updates').send({
-        type: 'broadcast',
-        event: 'user-left-circle',
-        payload: { userId: auth.user.id, circleId: channelId }
-      })
-
-      // After leaving, go back to inbox immediately
-      router.back()
-    } catch (err) {
-      console.error('Error leaving circle:', err)
-      Alert.alert('Error', 'Unable to leave circle. Please try again.')
-    }
-  }
-
-  const confirmLeaveChat = () => {
-    Alert.alert(
-      'Leave this chat?',
-      'You will no longer see this conversation in your inbox.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Leave', style: 'destructive', onPress: leaveChat }
-      ]
-    )
-  }
+  // Removed legacy leaveChat functions - users now leave circles via circle settings
 
   // Mark messages as read when they become visible
   const markMessagesAsRead = async () => {
@@ -1096,7 +1046,6 @@ export default function ChatScreen() {
       const { error: messageError } = await supabase
         .from('messages')
         .insert({
-          channel_id: channelId,
           circle_id: channelId,
           sender_id: user.id,
           content: `${addedUsernames.join(', ')} ${addedUsernames.length === 1 ? 'was' : 'were'} added to the circle`
@@ -1279,22 +1228,67 @@ export default function ChatScreen() {
         return;
       }
 
-      // Send threaded join message with photo
-      const { error: rpcError } = await supabase.rpc('upsert_sprint_message', {
-        p_circle_id: joinSprintData.circleId,
-        p_user_id: user.id,
-        p_sprint_id: joinSprintData.sprintId,
-        p_content: `🏃‍♂️ ${joinSprintData.username} joined the sprint`,
-        p_media_url: uploadedPhotoUrl
-      });
+      // Instead of using RPC, handle threading directly
+      // First, find the root message for this sprint
+      const { data: sprintMessages } = await supabase
+        .from('messages')
+        .select('id, join_count, thread_root_id')
+        .eq('circle_id', joinSprintData.circleId)
+        .eq('sprint_id', joinSprintData.sprintId);
+      
+      // Find the root message (where thread_root_id equals id)
+      const existingMessages = sprintMessages?.find(m => m.thread_root_id === m.id);
 
-      if (rpcError) {
-        console.error('[handleJoinPhoto] RPC error:', rpcError);
+      if (existingMessages) {
+        // Root message exists, create a reply
+        const { error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            circle_id: joinSprintData.circleId,
+            sender_id: user.id,
+            sprint_id: joinSprintData.sprintId,
+            content: `🏃‍♂️ ${joinSprintData.username} joined the sprint`,
+            media_url: uploadedPhotoUrl,
+            thread_root_id: existingMessages.id
+          });
+
+        if (!messageError) {
+          // Update join count on root message
+          await supabase
+            .from('messages')
+            .update({ 
+              join_count: (existingMessages.join_count || 1) + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingMessages.id);
+        }
       } else {
-        // Optimistically bump counter locally
-        setMessages(curr => curr.map(m => m.sprint_id === joinSprintData.sprintId ? { ...m, join_count: (m.join_count || 1) + 1 } : m));
-        setJoinedSprints(prev => [...prev, joinSprintData.sprintId]);
+        // No root message, create one
+        const { data: newMessage, error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            circle_id: joinSprintData.circleId,
+            sender_id: user.id,
+            sprint_id: joinSprintData.sprintId,
+            content: `🏃‍♂️ ${joinSprintData.username} joined the sprint`,
+            media_url: uploadedPhotoUrl,
+            join_count: 1
+          })
+          .select()
+          .single();
+
+        if (!messageError && newMessage) {
+          // Set thread_root_id to itself
+          await supabase
+            .from('messages')
+            .update({ thread_root_id: newMessage.id })
+            .eq('id', newMessage.id);
+        }
       }
+
+      // Optimistically bump counter locally
+      setMessages(curr => curr.map(m => m.sprint_id === joinSprintData.sprintId ? { ...m, join_count: (m.join_count || 1) + 1 } : m));
+      setJoinedSprints(prev => [...prev, joinSprintData.sprintId]);
 
       // Jump to sprints tab
       router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: joinSprintData.sprintId } });
@@ -1452,7 +1446,7 @@ export default function ChatScreen() {
         .from('sprint_participants')
         .select('user_id')
         .eq('sprint_id', sprintId)
-        .limit(3); // Only fetch first 3 for display
+        .limit(3);
         
       if (partError) {
         console.error('[fetchParticipantAvatars] participant error:', partError);
@@ -1560,20 +1554,13 @@ export default function ChatScreen() {
         <Text className="text-white text-lg font-semibold flex-1">
           {chatTitle}
         </Text>
-        {isCircle ? (
-          // Circle chat: only settings icon
-          <TouchableOpacity 
-            onPress={() => router.push(`/(modals)/circle-settings?circleId=${channelId}`)}
-            className="mr-3"
-          >
-            <Feather name="settings" size={22} color="white" />
-          </TouchableOpacity>
-        ) : (
-          // Legacy channel chat: leave button
-          <TouchableOpacity onPress={confirmLeaveChat}>
-            <Feather name="trash-2" size={22} color="white" />
-          </TouchableOpacity>
-        )}
+        {/* All chats are now circles - show settings icon */}
+        <TouchableOpacity 
+          onPress={() => router.push(`/(modals)/circle-settings?circleId=${channelId}`)}
+          className="mr-3"
+        >
+          <Feather name="settings" size={22} color="white" />
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView 

@@ -131,7 +131,6 @@ export default function CircleSettingsScreen() {
         .eq('id', circleId)
         .single();
       if (allowRow) {
-        console.log('Fetched allow_member_invites =', allowRow.allow_member_invites);
         setAllowInvites(allowRow.allow_member_invites);
       }
 

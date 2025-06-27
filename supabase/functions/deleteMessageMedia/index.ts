@@ -21,6 +21,13 @@ serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
+  // Check if this is an internal call from database trigger
+  const authHeader = req.headers.get('Authorization');
+  const isInternalCall = !authHeader || authHeader === '';
+  
+  // For external calls, you might want to add authentication checks here
+  // For internal calls from database triggers, we skip auth since the trigger is secure
+
   let payload: { files?: Array<{ bucket: string; path: string }> };
   try {
     payload = await req.json();

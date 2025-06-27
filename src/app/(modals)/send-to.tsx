@@ -93,23 +93,23 @@ export default function SendToModal() {
       setSending(true);
 
       // ---------------------------------------------------------
-      // 1. Resolve DM channels for all recipients first
+      // 1. Resolve DM circles for all recipients first
       // ---------------------------------------------------------
-      const channelMap = new Map<string, string>(); // recipientId -> channelId
+      const circleMap = new Map<string, string>(); // recipientId -> circleId
       for (const rid of selectedIds) {
-        const chId = await ensureDmChannel(rid);
-        if (chId) channelMap.set(rid, chId);
+        const circleId = await ensureDmCircle(rid);
+        if (circleId) circleMap.set(rid, circleId);
       }
 
-      if (channelMap.size === 0) {
-        console.warn('[SendTo] No channels resolved, aborting');
+      if (circleMap.size === 0) {
+        console.warn('[SendTo] No circles resolved, aborting');
         return;
       }
 
       // ---------------------------------------------------------
       // 2. Upload media once to chat-media bucket
       // ---------------------------------------------------------
-      const firstChannelId = Array.from(channelMap.values())[0];
+      const firstCircleId = Array.from(circleMap.values())[0];
       const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
 
       // Map extension to appropriate MIME
@@ -125,7 +125,7 @@ export default function SendToModal() {
         encoding: FileSystem.EncodingType.Base64,
       });
       const arrayBuf = decode(base64);
-      const path = `${firstChannelId}/${Date.now()}.${fileExt}`;
+      const path = `${firstCircleId}/${Date.now()}.${fileExt}`;
 
       const { error: upErr } = await supabase.storage.from('chat-media').upload(path, arrayBuf as any, {
         cacheControl: '3600',
@@ -141,11 +141,11 @@ export default function SendToModal() {
       const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path);
 
       // ---------------------------------------------------------
-      // 3. Insert a message in every channel referencing this image
+      // 3. Insert a message in every circle referencing this image
       // ---------------------------------------------------------
-      for (const [rid, channelId] of channelMap.entries()) {
+      for (const [rid, circleId] of circleMap.entries()) {
         const { error: msgErr } = await supabase.from('messages').insert({
-          channel_id: channelId,
+          circle_id: circleId,
           sender_id: user.id,
           media_url: publicUrl,
           content: '',
@@ -163,54 +163,60 @@ export default function SendToModal() {
     }
   };
 
-  const ensureDmChannel = async (otherId: string): Promise<string | null> => {
+  const ensureDmCircle = async (otherId: string): Promise<string | null> => {
     try {
-      // Step 1: find channel ids where current user is a member
+      // Step 1: find circle ids where current user is a member
       const { data: myLinks, error: myErr } = await supabase
-        .from('channel_members')
-        .select('channel_id')
-        .eq('member_id', user!.id);
+        .from('circle_members')
+        .select('circle_id')
+        .eq('user_id', user!.id);
       if (myErr) throw myErr;
 
-      const myIds = (myLinks || []).map((l: any) => l.channel_id);
+      const myIds = (myLinks || []).map((l: any) => l.circle_id);
       if (myIds.length === 0) myIds.push(''); // prevent empty IN
 
-      // Step 2: look for a channel that also contains the other user and is not a group (is_group = false) and exactly two members
+      // Step 2: look for a private circle with exactly two members (current user and other user)
       const { data: candidates, error: candErr } = await supabase
-        .from('channels')
-        .select('id, is_group, channel_members(count)', { count: 'exact' })
+        .from('circles')
+        .select('id, visibility')
         .in('id', myIds)
-        .eq('is_group', false);
+        .eq('visibility', 'private');
       if (candErr) throw candErr;
 
-      for (const ch of candidates || []) {
-        // fetch members for channel
+      for (const circle of candidates || []) {
+        // fetch members for circle
         const { data: members } = await supabase
-          .from('channel_members')
-          .select('member_id')
-          .eq('channel_id', ch.id);
-        const memberIds = (members || []).map((m: any) => m.member_id);
+          .from('circle_members')
+          .select('user_id')
+          .eq('circle_id', circle.id);
+        const memberIds = (members || []).map((m: any) => m.user_id);
         if (memberIds.length === 2 && memberIds.includes(otherId) && memberIds.includes(user!.id)) {
-          return ch.id;
+          return circle.id;
         }
       }
 
-      // none found, create new
-      const { data: channelRow, error: chErr } = await supabase
-        .from('channels')
-        .insert({ is_group: false })
+      // none found, create new DM circle
+      const { data: circleRow, error: circleErr } = await supabase
+        .from('circles')
+        .insert({ 
+          name: 'DM', // Will be displayed as usernames in UI
+          visibility: 'private',
+          owner: user!.id,
+          sprint_minutes: 25,
+          ttl_minutes: 1440 // 24 hours
+        })
         .select('id')
         .single();
-      if (chErr) throw chErr;
+      if (circleErr) throw circleErr;
 
-      await supabase.from('channel_members').insert([
-        { channel_id: channelRow.id, member_id: user!.id },
-        { channel_id: channelRow.id, member_id: otherId },
+      await supabase.from('circle_members').insert([
+        { circle_id: circleRow.id, user_id: user!.id, role: 'member' },
+        { circle_id: circleRow.id, user_id: otherId, role: 'member' },
       ]);
 
-      return channelRow.id;
+      return circleRow.id;
     } catch (e) {
-      console.warn('ensureDmChannel error', e);
+      console.warn('ensureDmCircle error', e);
       return null;
     }
   };

@@ -515,17 +515,29 @@ export default function SprintsTab() {
         .single();
 
       const username = profile?.username || 'Someone';
-      const { error: messageError } = await supabase
-        .rpc('upsert_sprint_message', {
-          p_circle_id: selectedCircleId,
-          p_user_id: user.id,
-          p_sprint_id: sprint.id,
-          p_content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`,
-          p_media_url: publicPhotoUrl
-        });
+      
+      // Create the initial sprint message (which will be the thread root)
+      const { data: newMessage, error: messageError } = await supabase
+        .from('messages')
+        .insert({
+          circle_id: selectedCircleId,
+          sender_id: user.id,
+          sprint_id: sprint.id,
+          content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`,
+          media_url: publicPhotoUrl,
+          join_count: 1
+        })
+        .select()
+        .single();
 
       if (messageError) {
         console.error('Error sending sprint notification:', messageError);
+      } else if (newMessage) {
+        // Set thread_root_id to itself to mark it as a root message
+        await supabase
+          .from('messages')
+          .update({ thread_root_id: newMessage.id })
+          .eq('id', newMessage.id);
       }
 
       // Generate quiz questions in the background
@@ -1085,16 +1097,42 @@ Return the response in this exact JSON format:
 
       const username = profile?.username || 'Someone';
 
-      // Bump the join counter via RPC (threaded message)
-      const { error: rpcError } = await supabase.rpc('upsert_sprint_message', {
-        p_circle_id: sprint.circle_id,
-        p_user_id: user.id,
-        p_sprint_id: sprint.id,
-        p_content: `🏃‍♂️ ${username} joined the sprint`,
-        p_media_url: null
-      });
+      // Handle threading directly - find the root message for this sprint
+      const { data: sprintMessages } = await supabase
+        .from('messages')
+        .select('id, join_count, thread_root_id')
+        .eq('circle_id', sprint.circle_id)
+        .eq('sprint_id', sprint.id);
+      
+      // Find the root message (where thread_root_id equals id)
+      const rootMessage = sprintMessages?.find(m => m.thread_root_id === m.id);
 
-      if (rpcError) console.error('Error bumping sprint join counter:', rpcError);
+      if (rootMessage) {
+        // Root message exists, create a reply
+        const { error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            circle_id: sprint.circle_id,
+            sender_id: user.id,
+            sprint_id: sprint.id,
+            content: `🏃‍♂️ ${username} joined the sprint`,
+            thread_root_id: rootMessage.id
+          });
+
+        if (!messageError) {
+          // Update join count on root message
+          await supabase
+            .from('messages')
+            .update({ 
+              join_count: (rootMessage.join_count || 1) + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', rootMessage.id);
+        }
+      } else {
+        // No root message found - this shouldn't normally happen
+        console.error('No root message found for sprint:', sprint.id);
+      }
 
       // Navigate to chat
       router.push(`/(modals)/chat?circleId=${sprint.circle_id}`);
