@@ -830,18 +830,9 @@ export default function ChatScreen() {
         throw error
       }
 
-      // For circles, data is a jsonb object with members array
-      const members = data?.members || []
-      const otherMembers = members.filter((m: any) => m.user_id !== user.id)
-      
-      // For DM circles (2 members), show the other person's name
-      // For group circles, show all other member names
-      if (members.length === 2) {
-        const otherMember = otherMembers[0]
-        setChatTitle(otherMember?.username || 'Chat')
-      } else {
-        setChatTitle(otherMembers.map((m: any) => m.username).join(', ') || 'Circle')
-      }
+      // For circles, data is a jsonb object with circle details
+      // Use the circle's actual name
+      setChatTitle(data?.name || 'Circle')
     } catch (error) {
       console.error('Error loading chat info:', error)
       // Don't show an alert here since loadMessages will handle the main error
@@ -984,7 +975,7 @@ export default function ChatScreen() {
   }
 
   const uploadAndSendMedia = async (media: any, userId: string) => {
-    const ext = media.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const ext = 'jpg' // Always jpg for photos
     const path = `${channelId}/${Date.now()}.${ext}`
 
     // Read file as base64 and convert to ArrayBuffer
@@ -998,7 +989,7 @@ export default function ChatScreen() {
       .storage
       .from('chat-media')
       .upload(path, arrayBuffer, {
-        contentType: media.type.startsWith('video') ? 'video/mp4' : `image/${ext}`
+        contentType: 'image/jpeg'
       })
 
     if (uploadError) throw uploadError
@@ -1031,7 +1022,7 @@ export default function ChatScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images', 'videos'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Only allow images
         quality: 0.7,
         allowsMultipleSelection: false
       })
@@ -1039,8 +1030,8 @@ export default function ChatScreen() {
       if (result.canceled) return
 
       const asset = result.assets[0]
-      const fileType = asset.type ?? 'image'
-      const fileName = asset.fileName || `media_${Date.now()}.${asset.uri.split('.').pop()}`
+      const fileType = 'image' // Always image since we only allow photos
+      const fileName = asset.fileName || `photo_${Date.now()}.jpg`
 
       // Add to selected media
       setSelectedMedia(prev => [...prev, {
@@ -1783,19 +1774,10 @@ export default function ChatScreen() {
                 {selectedMedia.map((media) => (
                   <View key={media.id} className="relative mr-2 mb-2">
                     <View className="w-16 h-16 bg-gray-700 rounded-lg overflow-hidden">
-                      {media.type.startsWith('video') ? (
-                        <Video
-                          source={{ uri: media.uri }}
-                          style={{ width: 64, height: 64 }}
-                          resizeMode={ResizeMode.COVER}
-                          shouldPlay={false}
-                        />
-                      ) : (
-                        <Image
-                          source={{ uri: media.uri }}
-                          style={{ width: 64, height: 64 }}
-                        />
-                      )}
+                      <Image
+                        source={{ uri: media.uri }}
+                        style={{ width: 64, height: 64 }}
+                      />
                     </View>
                     <TouchableOpacity
                       onPress={() => removeMedia(media.id)}
@@ -1811,9 +1793,9 @@ export default function ChatScreen() {
 
           {/* Input Row */}
           <View className="flex-row items-center p-4 bg-black">
-            {/* Media picker */}
+            {/* Photo picker */}
             <TouchableOpacity onPress={pickMedia} className="mr-3">
-              <Feather name="plus" size={22} color="white" />
+              <Feather name="image" size={22} color="white" />
             </TouchableOpacity>
 
             <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-3 mr-3 min-h-[44px]">

@@ -439,7 +439,7 @@ export default function InboxScreen() {
               <Feather name="search" size={24} color="white" />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/(modals)/new-chat')}>
-              <Feather name="edit" size={24} color="white" />
+              <Feather name="plus-circle" size={24} color="white" />
             </TouchableOpacity>
           </View>
         </View>
@@ -474,7 +474,7 @@ export default function InboxScreen() {
                 onPress={() => router.push('/(modals)/new-chat')}
                 className="bg-blue-500 px-6 py-3 rounded-full"
               >
-                <Text className="text-white font-semibold">Start Circle</Text>
+                <Text className="text-white font-semibold">Create Circle</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={() => router.push('/(modals)/discover-circles')}
