@@ -1,5 +1,5 @@
 import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, memo, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
@@ -14,11 +14,116 @@ interface CirclePreview {
   role: string
   member_count: number
   last_message_at: string | null
+  last_message_content: string | null
+  last_message_sender: string | null
+  last_message_media: boolean | null
 }
+
+// Memoized circle item component to prevent unnecessary re-renders
+const MemoizedCircleItem = memo(({ 
+  item, 
+  onPress, 
+  onLongPress, 
+  formatTime 
+}: { 
+  item: CirclePreview; 
+  onPress: (circle: CirclePreview) => void;
+  onLongPress: (circle: CirclePreview) => void;
+  formatTime: (timestamp: string) => string;
+}) => {
+  // Format last message preview
+  const getLastMessagePreview = () => {
+    if (!item.last_message_content && !item.last_message_media) {
+      return null;
+    }
+    
+    let preview = '';
+    if (item.last_message_sender) {
+      preview = `${item.last_message_sender}: `;
+    }
+    
+    if (item.last_message_media) {
+      preview += '📷 Photo';
+    } else if (item.last_message_content) {
+      // Truncate long messages
+      const maxLength = 30;
+      preview += item.last_message_content.length > maxLength 
+        ? item.last_message_content.substring(0, maxLength) + '...'
+        : item.last_message_content;
+    }
+    
+    return preview;
+  };
+  
+  const lastMessage = getLastMessagePreview();
+  
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(item)}
+      onLongPress={() => onLongPress(item)}
+      className="flex-row items-center p-4 border-b border-gray-800"
+    >
+      <View className="w-12 h-12 rounded-full bg-gray-600 items-center justify-center mr-3">
+        <Feather name="users" size={20} color="white" />
+      </View>
+      
+      <View className="flex-1">
+        <View className="flex-row justify-between items-center mb-1">
+          <View className="flex-1 flex-row items-center">
+            <Text className="text-white font-semibold text-base" numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.visibility === 'public' && (
+              <Feather name="globe" size={14} color="#9CA3AF" style={{ marginLeft: 8 }} />
+            )}
+          </View>
+          {item.last_message_at && (
+            <Text className="text-gray-400 text-xs" numberOfLines={1}>
+              {formatTime(item.last_message_at)}
+            </Text>
+          )}
+        </View>
+        
+        {/* Last message preview or member count */}
+        {lastMessage ? (
+          <Text className="text-gray-400 text-sm" numberOfLines={1}>
+            {lastMessage}
+          </Text>
+        ) : (
+          <View className="flex-row items-center">
+            <Text className="text-gray-500 text-sm italic">
+              {item.member_count} member{item.member_count !== 1 ? 's' : ''}
+            </Text>
+            {item.role === 'owner' && (
+              <View className="flex-row items-center ml-2">
+                <Feather name="star" size={12} color="#F59E0B" />
+                <Text className="text-yellow-500 text-xs ml-1">Owner</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison - only re-render if specific properties change
+  return (
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.item.name === nextProps.item.name &&
+    prevProps.item.visibility === nextProps.item.visibility &&
+    prevProps.item.member_count === nextProps.item.member_count &&
+    prevProps.item.role === nextProps.item.role &&
+    prevProps.item.last_message_at === nextProps.item.last_message_at &&
+    prevProps.item.last_message_content === nextProps.item.last_message_content &&
+    prevProps.item.last_message_sender === nextProps.item.last_message_sender &&
+    prevProps.item.last_message_media === nextProps.item.last_message_media
+  );
+});
 
 export default function InboxScreen() {
   const [circles, setCircles] = useState<CirclePreview[]>([])
   const [loading, setLoading] = useState(true)
+  const [lastMessageTimes, setLastMessageTimes] = useState<Record<string, string>>({})
 
   // Refresh chats when the screen comes into focus
   useFocusEffect(
@@ -40,7 +145,8 @@ export default function InboxScreen() {
 
       // Set up periodic refresh every 30 seconds as a fallback
       refreshInterval = setInterval(() => {
-        loadCircles()
+        // Only update last message times, not reload everything
+        updateLastMessageTimes()
       }, 30000)
 
       channel = supabase
@@ -75,7 +181,7 @@ export default function InboxScreen() {
             loadCircles()
           }
         )
-        // A brand-new message landed anywhere – cheaper to just refresh the list
+        // A brand-new message landed - only update the affected circle
         .on(
           'postgres_changes',
           {
@@ -83,9 +189,27 @@ export default function InboxScreen() {
             schema: 'public',
             table: 'messages',
           },
-          () => loadCircles()
+          async (payload) => {
+            const newMessage = payload.new as any
+            if (newMessage.circle_id) {
+              // Fetch sender info and update the circle
+              const { data: senderProfile } = await supabase
+                .from('profiles')
+                .select('username')
+                .eq('user_id', newMessage.sender_id)
+                .single()
+              
+              updateCircleLastMessage(
+                newMessage.circle_id, 
+                newMessage.created_at,
+                newMessage.content,
+                senderProfile?.username || 'Unknown',
+                !!newMessage.media_url
+              )
+            }
+          }
         )
-        // A message was deleted (e.g., by cron job) – refresh to update last message
+        // A message was deleted - only update if it affects a circle we're displaying
         .on(
           'postgres_changes',
           {
@@ -93,8 +217,44 @@ export default function InboxScreen() {
             schema: 'public',
             table: 'messages',
           },
-          () => {
-            loadCircles()
+          async (payload) => {
+            const deletedMessage = payload.old as any
+            if (deletedMessage.circle_id) {
+              // Fetch the new last message for this circle
+              const { data } = await supabase
+                .from('messages')
+                .select('created_at, content, media_url, sender_id')
+                .eq('circle_id', deletedMessage.circle_id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single()
+                
+              if (data) {
+                // Get sender info
+                const { data: senderProfile } = await supabase
+                  .from('profiles')
+                  .select('username')
+                  .eq('user_id', data.sender_id)
+                  .single()
+                  
+                updateCircleLastMessage(
+                  deletedMessage.circle_id, 
+                  data.created_at,
+                  data.content,
+                  senderProfile?.username || 'Unknown',
+                  !!data.media_url
+                )
+              } else {
+                // No messages left in circle
+                updateCircleLastMessage(
+                  deletedMessage.circle_id, 
+                  null,
+                  null,
+                  null,
+                  false
+                )
+              }
+            }
           }
         )
         .subscribe()
@@ -107,6 +267,89 @@ export default function InboxScreen() {
       if (refreshInterval) clearInterval(refreshInterval)
     }
   }, [])
+
+  const updateCircleLastMessage = (
+    circleId: string, 
+    lastMessageAt: string | null,
+    content?: string | null,
+    sender?: string | null,
+    hasMedia?: boolean
+  ) => {
+    setCircles(prev => prev.map(circle => 
+      circle.id === circleId 
+        ? { 
+            ...circle, 
+            last_message_at: lastMessageAt,
+            last_message_content: content !== undefined ? content : circle.last_message_content,
+            last_message_sender: sender !== undefined ? sender : circle.last_message_sender,
+            last_message_media: hasMedia !== undefined ? hasMedia : circle.last_message_media
+          }
+        : circle
+    ))
+  }
+
+  const updateLastMessageTimes = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Get all circles the user is a member of
+      const { data: memberCircles } = await supabase
+        .from('circle_members')
+        .select('circle_id')
+        .eq('user_id', user.id)
+
+      if (!memberCircles || memberCircles.length === 0) return
+
+      const circleIds = memberCircles.map(cm => cm.circle_id)
+
+      // Get last message time for each circle
+      const promises = circleIds.map(async (circleId) => {
+        const { data } = await supabase
+          .from('messages')
+          .select('created_at, content, media_url, sender_id')
+          .eq('circle_id', circleId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+          
+        if (data) {
+          // Get sender info
+          const { data: senderProfile } = await supabase
+            .from('profiles')
+            .select('username')
+            .eq('user_id', data.sender_id)
+            .single()
+            
+          return { 
+            circleId, 
+            lastMessageAt: data.created_at,
+            content: data.content,
+            sender: senderProfile?.username || 'Unknown',
+            hasMedia: !!data.media_url
+          }
+        }
+        
+        return { circleId, lastMessageAt: null, content: null, sender: null, hasMedia: false }
+      })
+
+      const results = await Promise.all(promises)
+      
+      // Update only the last message times
+      setCircles(prev => prev.map(circle => {
+        const update = results.find(r => r.circleId === circle.id)
+        return update ? { 
+          ...circle, 
+          last_message_at: update.lastMessageAt,
+          last_message_content: update.content,
+          last_message_sender: update.sender,
+          last_message_media: update.hasMedia
+        } : circle
+      }))
+    } catch (error) {
+      console.error('Error updating last message times:', error)
+    }
+  }
 
   const loadCircles = async () => {
     setLoading(true)
@@ -126,7 +369,7 @@ export default function InboxScreen() {
     }
   }
 
-  const formatTime = (timestamp: string) => {
+  const formatTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp)
     const now = new Date()
     const diff = now.getTime() - date.getTime()
@@ -139,14 +382,13 @@ export default function InboxScreen() {
     } else {
       return `${Math.floor(hours / 24)}d`
     }
-  }
+  }, [])
 
-  const getCircleDisplayName = (circle: CirclePreview) => circle.name
+  const handleCirclePress = useCallback((circle: CirclePreview) => {
+    router.push(`/(modals)/chat?circleId=${circle.id}`)
+  }, [])
 
-  // For now we don't have per-member avatars for circles; return null to show default icon
-  const getCircleAvatar = (_circle: CirclePreview) => null
-
-  const showCircleOptions = (circle: CirclePreview) => {
+  const showCircleOptions = useCallback((circle: CirclePreview) => {
     Alert.alert(
       circle.name,
       'Choose an action',
@@ -165,54 +407,16 @@ export default function InboxScreen() {
         }
       ]
     );
-  };
+  }, [])
 
-  const renderCircleItem = ({ item }: { item: CirclePreview }) => (
-    <TouchableOpacity
-      onPress={() => router.push(`/(modals)/chat?circleId=${item.id}`)}
-      onLongPress={() => showCircleOptions(item)}
-      className="flex-row items-center p-4 border-b border-gray-800"
-    >
-      <View className="w-12 h-12 rounded-full bg-gray-600 items-center justify-center mr-3">
-        <Feather name="users" size={20} color="white" />
-      </View>
-      
-      <View className="flex-1">
-        <View className="flex-row justify-between items-center mb-1">
-          <View className="flex-1 flex-row items-center">
-            <Text className="text-white font-semibold text-base flex-1">
-              {getCircleDisplayName(item)}
-            </Text>
-            {item.visibility === 'public' && (
-              <Feather name="globe" size={14} color="#9CA3AF" style={{ marginLeft: 8 }} />
-            )}
-          </View>
-          {item.last_message_at ? (
-            <Text className="text-gray-400 text-sm" numberOfLines={1}>
-              Last activity {formatTime(item.last_message_at)} ago
-            </Text>
-          ) : (
-            <Text className="text-gray-500 text-sm italic">
-              No activity yet
-            </Text>
-          )}
-        </View>
-        
-        {/* Show member count and role */}
-        <View className="flex-row items-center">
-          <Text className="text-gray-500 text-sm italic">
-            {item.member_count} member{item.member_count !== 1 ? 's' : ''}
-          </Text>
-          {item.role === 'owner' && (
-            <View className="flex-row items-center ml-2">
-              <Feather name="star" size={12} color="#F59E0B" />
-              <Text className="text-yellow-500 text-xs ml-1">Owner</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    </TouchableOpacity>
-  )
+  const renderCircleItem = useCallback(({ item }: { item: CirclePreview }) => (
+    <MemoizedCircleItem
+      item={item}
+      onPress={handleCirclePress}
+      onLongPress={showCircleOptions}
+      formatTime={formatTime}
+    />
+  ), [handleCirclePress, showCircleOptions, formatTime])
 
   if (loading) {
     return (
@@ -247,6 +451,14 @@ export default function InboxScreen() {
             renderItem={renderCircleItem}
             keyExtractor={(item) => item.id}
             className="flex-1"
+            removeClippedSubviews={true}
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={10}
+            updateCellsBatchingPeriod={50}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0
+            }}
           />
         ) : (
           <View className="flex-1 justify-center items-center p-8">
