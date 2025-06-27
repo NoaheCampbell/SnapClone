@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, Modal, TouchableWithoutFeedback } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, Modal, TouchableWithoutFeedback, ActivityIndicator } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -9,6 +9,7 @@ import { Video, ResizeMode } from 'expo-av'
 import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system'
 import * as SecureStore from 'expo-secure-store'
+import SprintCamera from '../../components/SprintCamera'
 // @ts-ignore
 import EmojiPicker from 'rn-emoji-keyboard'
 
@@ -61,14 +62,16 @@ const getOpenAIKey = async () => {
 
 interface Message {
   id: number
-  content: string
+  content: string | null
+  media_url?: string | null
+  sprint_id?: string | null
   sender_id: string
   created_at: string
   sender_name: string
   is_own_message: boolean
-  media_url?: string
   media_type?: string
   reactions?: { emoji: string; count: number; reactedByMe: boolean }[]
+  join_count?: number
 }
 
 const REACTIONS = ['👍','🔥','📚'] as const
@@ -124,6 +127,18 @@ export default function ChatScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
   const [reactionsMap, setReactionsMap] = useState<Record<number, {emoji:string; user_id:string}[]>>({})
+  const [joinedSprints, setJoinedSprints] = useState<string[]>([])
+  const [showThreadModal, setShowThreadModal] = useState(false)
+  const [threadMessages, setThreadMessages] = useState<Message[]>([])
+  const [threadRootMessage, setThreadRootMessage] = useState<Message | null>(null)
+  const [loadingThread, setLoadingThread] = useState(false)
+  const [showJoinCamera, setShowJoinCamera] = useState(false)
+  const [joinSprintData, setJoinSprintData] = useState<{
+    sprintId: string;
+    circleId: string;
+    originalSprint: any;
+    username: string;
+  } | null>(null)
 
   // Calculate keyboard offset including header height and safe area
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 20 : 20
@@ -153,6 +168,9 @@ export default function ChatScreen() {
             
             const { data: { user } } = await supabase.auth.getUser()
 
+            // Only emit root messages (thread_root_id null or equals id)
+            if (newMessage.thread_root_id && newMessage.thread_root_id !== newMessage.id) return;
+
             setMessages(currentMessages => {
               // Check if message already exists to prevent duplicates
               const messageExists = currentMessages.some(m => m.id === newMessage.id)
@@ -168,6 +186,9 @@ export default function ChatScreen() {
                   sender_name: profile?.username || 'Unknown',
                   is_own_message: newMessage.sender_id === (user?.id || ''),
                   media_url: newMessage.media_url,
+                  sprint_id: newMessage.sprint_id,
+                  media_type: newMessage.media_type,
+                  join_count: newMessage.join_count,
                 }
               ]
             })
@@ -245,6 +266,36 @@ export default function ChatScreen() {
               }
               return newReceipts
             })
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `channel_id=eq.${channelId}`
+          },
+          (payload) => {
+            const updated = payload.new as any;
+            console.log('[message UPDATE]', updated.id, 'join_count', updated.join_count);
+            setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
+            if (updated.join_count > 1 && updated.sprint_id) {
+              setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `circle_id=eq.${channelId}`
+          },
+          (payload) => {
+            const updated = payload.new as any;
+            setMessages(curr => curr.map(m => m.id === updated.id ? { ...m, join_count: updated.join_count } : m));
           }
         )
         .subscribe()
@@ -363,7 +414,8 @@ export default function ChatScreen() {
         throw error
       }
 
-      setMessages(data || [])
+      const rootMsgs = (data || []).filter((m: any) => !m.thread_root_id || m.thread_root_id === m.id)
+      setMessages(rootMsgs)
       
       // Load read receipts for messages
       if (data && data.length > 0) {
@@ -558,17 +610,50 @@ export default function ChatScreen() {
                 resizeMode={ResizeMode.CONTAIN}
               />
             ) : (
-              <Image
-                source={{ uri: item.media_url }}
-                style={{ width: 200, height: 200, borderRadius: 8 }}
-              />
+              <View>
+                <Image
+                  source={{ uri: item.media_url }}
+                  style={{ width: 200, height: 200, borderRadius: 8 }}
+                />
+                {/* Sprint buttons positioned below the image */}
+                {item.sprint_id && (
+                  <View className="flex-row justify-center mt-2 items-center space-x-2">
+                    {!item.is_own_message && !joinedSprints.includes(item.sprint_id as string) && (
+                      <TouchableOpacity
+                        className="bg-blue-600 px-3 py-1.5 rounded-full"
+                        onPress={() => joinSprint(item.sprint_id as string, channelId as string)}
+                      >
+                        <Text className="text-white text-xs font-medium">Join Sprint</Text>
+                      </TouchableOpacity>
+                    )}
+                    {item.join_count && item.join_count > 1 && (
+                      <TouchableOpacity 
+                        className="bg-blue-500/90 px-2 py-0.5 rounded-full flex-row items-center"
+                        onPress={() => openThread(item)}
+                      >
+                        <Feather name="message-square" size={12} color="white" style={{ marginRight: 4 }} />
+                        <Text className="text-white text-xs">{item.join_count}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
             )
           ) : (
             <Text className="text-white text-base">
               {item.content}
             </Text>
           )}
-          <View className="flex-row items-center justify-between mt-1">
+          {/* If sprint message without media (safety) add view button below */}
+          {!item.media_url && item.sprint_id && (
+            <TouchableOpacity
+              className="mt-2 bg-black/20 px-2 py-1 rounded"
+              onPress={() => router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: item.sprint_id } })}
+            >
+              <Text className="text-white text-xs">View Sprint</Text>
+            </TouchableOpacity>
+          )}
+          <View className={`flex-row items-center justify-between ${item.sprint_id && item.media_url ? 'mt-2' : 'mt-1'}`}>
             <Text className={`text-xs ${
               item.is_own_message ? 'text-blue-100' : 'text-gray-400'
             }`}>
@@ -904,6 +989,233 @@ export default function ChatScreen() {
     />
   )
 
+  // -----------------------------------------------------------------
+  // Join existing sprint directly from chat message
+  // -----------------------------------------------------------------
+  async function joinSprint (sprintId: string, circleId: string) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Check if user already joined
+      const { data: existing } = await supabase
+        .from('sprint_participants')
+        .select('sprint_id')
+        .eq('sprint_id', sprintId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (existing) {
+        Alert.alert('Already Joined', 'You have already joined this sprint.');
+        return;
+      }
+
+      console.log('[joinSprint] inserting participant');
+      // Insert participant row (first time join)
+      const { error: partErr } = await supabase
+        .from('sprint_participants')
+        .insert({ sprint_id: sprintId, user_id: user.id });
+
+      if (partErr) {
+        console.error('Error inserting sprint participant:', partErr);
+        return;
+      }
+
+      console.log('[joinSprint] participant row ok');
+
+      // Get original sprint details to create joiner's sprint
+      const { data: originalSprint } = await supabase
+        .from('sprints')
+        .select('topic, goals, quiz_question_count, ends_at, circle_id')
+        .eq('id', sprintId)
+        .single();
+
+      // Get username for message
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', user.id)
+        .single();
+
+      const username = profile?.username || 'Someone';
+
+      if (originalSprint) {
+        // Store data for after photo capture
+        setJoinSprintData({
+          sprintId,
+          circleId,
+          originalSprint,
+          username
+        });
+        
+        // Show camera for join photo
+        setShowJoinCamera(true);
+      }
+    } catch (err) {
+      console.error('Error joining sprint from chat:', err);
+    }
+  }
+
+  // Add handler for join photo capture
+  const handleJoinPhoto = async (photoUrl: string) => {
+    if (!joinSprintData) return;
+    
+    setShowJoinCamera(false);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      console.log('[handleJoinPhoto] creating joiner sprint with photo');
+      
+      // Upload photo first
+      const uploadedPhotoUrl = await uploadJoinPhoto(photoUrl);
+      
+      // Create sprint for joiner with photo
+      const { data: joinerSprint, error: sprintError } = await supabase
+        .from('sprints')
+        .insert({
+          circle_id: joinSprintData.originalSprint.circle_id,
+          user_id: user.id,
+          topic: joinSprintData.originalSprint.topic,
+          goals: joinSprintData.originalSprint.goals,
+          quiz_question_count: joinSprintData.originalSprint.quiz_question_count,
+          tags: [],
+          ends_at: joinSprintData.originalSprint.ends_at,
+          joined_from: joinSprintData.sprintId,
+          media_url: uploadedPhotoUrl
+        })
+        .select()
+        .single();
+
+      if (sprintError) {
+        console.error('[handleJoinPhoto] error creating joiner sprint:', sprintError);
+        return;
+      }
+
+      console.log('[handleJoinPhoto] joiner sprint created:', joinerSprint.id);
+
+      // Send threaded join message with photo
+      console.log('[handleJoinPhoto] calling upsert_sprint_message');
+      const { error: rpcError } = await supabase.rpc('upsert_sprint_message', {
+        p_circle_id: joinSprintData.circleId,
+        p_user_id: user.id,
+        p_sprint_id: joinSprintData.sprintId,
+        p_content: `🏃‍♂️ ${joinSprintData.username} joined the sprint`,
+        p_media_url: uploadedPhotoUrl
+      });
+
+      if (rpcError) {
+        console.error('[handleJoinPhoto] RPC error:', rpcError);
+      } else {
+        console.log('[handleJoinPhoto] RPC success');
+        // Optimistically bump counter locally
+        setMessages(curr => curr.map(m => m.sprint_id === joinSprintData.sprintId ? { ...m, join_count: (m.join_count || 1) + 1 } : m));
+        setJoinedSprints(prev => [...prev, joinSprintData.sprintId]);
+      }
+
+      // Jump to sprints tab
+      router.push({ pathname: '/(tabs)/sprints', params: { viewSprint: joinSprintData.sprintId } });
+      
+      // Clear join data
+      setJoinSprintData(null);
+    } catch (err) {
+      console.error('Error handling join photo:', err);
+    }
+  };
+
+  const uploadJoinPhoto = async (photoUri: string) => {
+    try {
+      const ext = 'jpg';
+      const path = `joins/${Date.now()}.${ext}`;
+
+      // Read file as base64 and convert to ArrayBuffer
+      const base64 = await FileSystem.readAsStringAsync(photoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      const arrayBuffer = decode(base64);
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('chat-media')
+        .upload(path, arrayBuffer, {
+          contentType: 'image/jpeg'
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path);
+      return data.publicUrl;
+    } catch (error) {
+      console.error('Error uploading join photo:', error);
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('sprint_participants')
+        .select('sprint_id')
+        .eq('user_id', user.id);
+      if (data) setJoinedSprints(data.map(r => r.sprint_id));
+    })();
+  }, []);
+
+  // -----------------------------------------------------------------
+  // Open thread view to see all join messages
+  // -----------------------------------------------------------------
+  const openThread = async (rootMessage: Message) => {
+    if (!rootMessage.sprint_id) return;
+    
+    console.log('[openThread] rootMessage:', rootMessage.id, 'sprint_id:', rootMessage.sprint_id);
+    
+    setLoadingThread(true);
+    setThreadRootMessage(rootMessage);
+    setShowThreadModal(true);
+    
+    try {
+      // Load all messages in this thread (including the root)
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          id, content, media_url, sprint_id, sender_id, created_at, join_count, thread_root_id,
+          profiles!messages_sender_id_fkey(username)
+        `)
+        .or(`id.eq.${rootMessage.id},thread_root_id.eq.${rootMessage.id}`)
+        .order('created_at', { ascending: true });
+        
+      if (error) throw error;
+      
+      console.log('[openThread] fetched messages:', data?.length, data?.map(m => ({ id: m.id, content: m.content, thread_root_id: m.thread_root_id })));
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const processedMessages: Message[] = (data || []).map((msg: any) => ({
+        id: msg.id,
+        content: msg.content,
+        media_url: msg.media_url,
+        sprint_id: msg.sprint_id,
+        sender_id: msg.sender_id,
+        created_at: msg.created_at,
+        join_count: msg.join_count,
+        sender_name: msg.profiles.username,
+        is_own_message: msg.sender_id === user?.id,
+      }));
+      
+      console.log('[openThread] processed messages:', processedMessages.length, processedMessages.map(m => ({ id: m.id, content: m.content, media_url: !!m.media_url })));
+      
+      setThreadMessages(processedMessages);
+    } catch (error) {
+      console.error('Error loading thread:', error);
+    } finally {
+      setLoadingThread(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black">
@@ -1144,6 +1456,81 @@ export default function ChatScreen() {
       )}
 
       <ReactionPicker />
+
+      {/* Thread Modal */}
+      <Modal
+        visible={showThreadModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <SafeAreaView className="flex-1 bg-black">
+          {/* Thread Header */}
+          <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
+            <TouchableOpacity onPress={() => setShowThreadModal(false)}>
+              <Feather name="x" size={24} color="white" />
+            </TouchableOpacity>
+            <Text className="text-white text-lg font-semibold">Thread</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          {/* Thread Messages */}
+          {loadingThread ? (
+            <View className="flex-1 justify-center items-center">
+              <ActivityIndicator size="large" color="white" />
+            </View>
+          ) : (
+            <FlatList
+              data={threadMessages}
+              renderItem={({ item }) => (
+                <View className={`mb-3 mx-4 ${item.is_own_message ? 'items-end' : 'items-start'}`}>
+                  <View className={`max-w-[80%] p-3 rounded-2xl ${
+                    item.is_own_message 
+                      ? 'bg-blue-500 rounded-br-md' 
+                      : 'bg-gray-700 rounded-bl-md'
+                  }`}>
+                    {!item.is_own_message && (
+                      <Text className="text-gray-300 text-xs mb-1 font-semibold">
+                        {item.sender_name}
+                      </Text>
+                    )}
+                    {item.media_url ? (
+                      <Image
+                        source={{ uri: item.media_url }}
+                        style={{ width: 200, height: 200, borderRadius: 8 }}
+                      />
+                    ) : (
+                      <Text className="text-white text-base">
+                        {item.content}
+                      </Text>
+                    )}
+                    <Text className={`text-xs mt-1 ${
+                      item.is_own_message ? 'text-blue-100' : 'text-gray-400'
+                    }`}>
+                      {formatTime(item.created_at)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+              keyExtractor={(item) => item.id.toString()}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 16 }}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Join Sprint Camera */}
+      {showJoinCamera && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }}>
+          <SprintCamera
+            onCapture={handleJoinPhoto}
+            onCancel={() => {
+              setShowJoinCamera(false);
+              setJoinSprintData(null);
+            }}
+          />
+        </View>
+      )}
     </SafeAreaView>
   )
 } 

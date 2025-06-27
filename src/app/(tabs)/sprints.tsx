@@ -4,7 +4,7 @@ import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
@@ -12,6 +12,8 @@ import QuizModal from '../../components/QuizModal';
 import SprintCompletionModal from '../../components/SprintCompletionModal';
 import QuizResultsModal from '../../components/QuizResultsModal';
 import ConceptMapModal from '../../components/ConceptMapModal';
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
 
 interface Sprint {
   id: string;
@@ -76,6 +78,11 @@ export default function SprintsTab() {
   const [conceptMapSprintTopic, setConceptMapSprintTopic] = useState<string>('');
 
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
+
+  const params = useLocalSearchParams<{
+    viewSprint?: string;
+    copyFrom?: string;
+  }>();
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -425,6 +432,35 @@ export default function SprintsTab() {
     createSprintWithPhoto(photoUrl);
   };
 
+  const uploadSprintPhoto = async (photoUri: string, sprintId: string) => {
+    try {
+      const ext = 'jpg'; // Sprint photos are always JPG from camera
+      const path = `sprints/${sprintId}/${Date.now()}.${ext}`;
+
+      // Read file as base64 and convert to ArrayBuffer
+      const base64 = await FileSystem.readAsStringAsync(photoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      const arrayBuffer = decode(base64);
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('chat-media')
+        .upload(path, arrayBuffer, {
+          contentType: 'image/jpeg'
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path);
+      return data.publicUrl;
+    } catch (error) {
+      console.error('Error uploading sprint photo:', error);
+      throw error;
+    }
+  };
+
   const createSprintWithPhoto = async (photoUrl: string) => {
     if (!sprintTopic.trim() || creatingSprintLoading) return;
     
@@ -440,7 +476,7 @@ export default function SprintsTab() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Create sprint directly in database with photo
+      // Create sprint first to get ID for photo upload
       const endsAt = new Date(Date.now() + duration * 60 * 1000);
 
       const { data: sprint, error: sprintError } = await supabase
@@ -453,12 +489,23 @@ export default function SprintsTab() {
           quiz_question_count: quizQuestionCount,
           tags: [],
           ends_at: endsAt.toISOString(),
-          media_url: photoUrl
+          // Don't set media_url yet - we'll update it after upload
         })
         .select()
         .single();
 
       if (sprintError) throw sprintError;
+
+      // Upload photo to Supabase storage and get public URL
+      const publicPhotoUrl = await uploadSprintPhoto(photoUrl, sprint.id);
+
+      // Update sprint with the uploaded photo URL
+      const { error: updateError } = await supabase
+        .from('sprints')
+        .update({ media_url: publicPhotoUrl })
+        .eq('id', sprint.id);
+
+      if (updateError) throw updateError;
 
       // Send a system message to the circle about the sprint start
       const { data: profile } = await supabase
@@ -469,17 +516,23 @@ export default function SprintsTab() {
 
       const username = profile?.username || 'Someone';
       const { error: messageError } = await supabase
-        .from('messages')
-        .insert({
-          circle_id: selectedCircleId,
-          sender_id: user.id,
-          content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`
+        .rpc('upsert_sprint_message', {
+          p_circle_id: selectedCircleId,
+          p_user_id: user.id,
+          p_sprint_id: sprint.id,
+          p_content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`,
+          p_media_url: publicPhotoUrl
         });
 
       if (messageError) console.error('Error sending sprint notification:', messageError);
 
       // Generate quiz questions in the background
       generateQuizForSprint(sprint.id, sprintTopic, sprintGoals, quizQuestionCount);
+
+      // Add creator as participant
+      await supabase
+        .from('sprint_participants')
+        .upsert({ sprint_id: sprint.id, user_id: user.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
 
       setShowSprintModal(false);
       setStartPhotoUrl('');
@@ -790,6 +843,34 @@ Return the response in this exact JSON format:
     };
   }, [loadData]);
 
+  // Effect to react to route params once data is loaded
+  useEffect(() => {
+    if (!loading && recentSprints.length > 0) {
+      if (params.viewSprint) {
+        const sprint = recentSprints.find(s => s.id === params.viewSprint);
+        if (sprint) {
+          // Scroll to sprint or show modal – for now just alert details
+          Alert.alert(sprint.topic, `Sprint by ${sprint.username} in ${sprint.circle_name}`);
+        }
+        // Clear the parameter to prevent re-triggering
+        router.setParams({ viewSprint: undefined });
+      } else if (params.copyFrom) {
+        const sprint = recentSprints.find(s => s.id === params.copyFrom);
+        if (sprint) {
+          setSelectedCircleId(sprint.circle_id);
+          setSprintTopic(sprint.topic);
+          setSprintGoals(sprint.goals || '');
+          const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
+          setCustomDuration(duration.toString());
+          setQuizQuestionCount(sprint.quiz_question_count || 3);
+          setShowSprintModal(true);
+        }
+        // Clear the parameter to prevent re-triggering
+        router.setParams({ copyFrom: undefined });
+      }
+    }
+  }, [params, loading, recentSprints]);
+
   const SwipeableSprintItem = memo(({ item }: { item: Sprint }) => {
     const isMySprintAndActive = item.user_id === user?.id && item.is_active;
     
@@ -920,7 +1001,7 @@ Return the response in this exact JSON format:
               </>
             )}
             <TouchableOpacity 
-              onPress={() => router.push(`/(modals)/chat?circleId=${item.circle_id}`)}
+              onPress={() => joinSprint(item)}
               className="flex-row items-center"
             >
               <Feather name="message-circle" size={16} color="#60A5FA" />
@@ -981,6 +1062,44 @@ Return the response in this exact JSON format:
       </View>
     </TouchableOpacity>
   );
+
+  // Join an existing sprint (increment join counter and optionally track participation)
+  const joinSprint = async (sprint: Sprint) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Insert participant row or ignore if already exists
+      await supabase
+        .from('sprint_participants')
+        .upsert({ sprint_id: sprint.id, user_id: user.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
+
+      // Fetch username for message content
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', user.id)
+        .single();
+
+      const username = profile?.username || 'Someone';
+
+      // Bump the join counter via RPC (threaded message)
+      const { error: rpcError } = await supabase.rpc('upsert_sprint_message', {
+        p_circle_id: sprint.circle_id,
+        p_user_id: user.id,
+        p_sprint_id: sprint.id,
+        p_content: `🏃‍♂️ ${username} joined the sprint`,
+        p_media_url: null
+      });
+
+      if (rpcError) console.error('Error bumping sprint join counter:', rpcError);
+
+      // Navigate to chat
+      router.push(`/(modals)/chat?circleId=${sprint.circle_id}`);
+    } catch (error) {
+      console.error('Error joining sprint:', error);
+    }
+  };
 
   if (!user) {
     return (
