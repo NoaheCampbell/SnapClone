@@ -61,8 +61,12 @@ serve(async (req) => {
     const summaryTags = userSprints.flatMap(s => s.summaries?.tags || [])
     const allUserTags = [...userTags, ...summaryTags].filter(Boolean)
 
+    console.log('User sprint topics:', userTopics)
+    console.log('User tags:', allUserTags)
+
     // Create a representative embedding for the user's interests
     const userInterestsText = `${userTopics.join(' ')} ${allUserTags.join(' ')}`
+    console.log('User interests text for embedding:', userInterestsText)
     
     let userEmbedding = null
     if (userInterestsText.trim()) {
@@ -113,24 +117,65 @@ serve(async (req) => {
       throw publicCirclesError
     }
 
+    console.log('Found public circles (excluding user circles):', publicCircles?.length || 0)
+    console.log('Public circles:', publicCircles?.map(c => ({ id: c.id, name: c.name })))
+
     // Calculate similarity scores for each circle
     const circleScores = await Promise.all(
       publicCircles.map(async (circle: any) => {
         let score = 0
         let reasons = []
 
-        // Topic overlap scoring
+        // Topic overlap scoring (more flexible keyword matching)
         const circleTopics = circle.sprints?.map((s: any) => s.topic).filter(Boolean) || []
+        
+        // Also check circle name for topic relevance
+        const allCircleText = [circle.name, ...circleTopics].join(' ').toLowerCase()
+        const userTopicsText = userTopics.join(' ').toLowerCase()
+        
+        let topicScore = 0
+        let matchedTerms = []
+        
+        // Direct topic overlap
         const topicOverlap = circleTopics.filter((topic: string) => 
           userTopics.some(userTopic => 
             userTopic.toLowerCase().includes(topic.toLowerCase()) || 
             topic.toLowerCase().includes(userTopic.toLowerCase())
           )
         ).length
-
+        
         if (topicOverlap > 0) {
-          score += topicOverlap * 10
-          reasons.push(`Similar study topics: ${topicOverlap} matches`)
+          topicScore += topicOverlap * 10
+          matchedTerms.push(`${topicOverlap} topic matches`)
+        }
+        
+        // Keyword matching in circle name (e.g., "periodic table" -> "Chemistry")
+        const chemKeywords = ['chemistry', 'chemical', 'periodic', 'element', 'molecule', 'atom']
+        const mathKeywords = ['math', 'calculus', 'algebra', 'geometry', 'statistics']
+        const physicsKeywords = ['physics', 'quantum', 'mechanics', 'thermodynamics']
+        const bioKeywords = ['biology', 'biochemistry', 'genetics', 'cell', 'organism']
+        
+        const allKeywords = [...chemKeywords, ...mathKeywords, ...physicsKeywords, ...bioKeywords]
+        
+        for (const keyword of allKeywords) {
+          if (userTopicsText.includes(keyword) && allCircleText.includes(keyword)) {
+            topicScore += 8
+            matchedTerms.push(`${keyword} keyword match`)
+            break // Only count one keyword match per circle
+          }
+        }
+        
+        // Subject area matching (broader categories)
+        if (userTopicsText.includes('periodic') || userTopicsText.includes('chemistry')) {
+          if (allCircleText.includes('chemistry') || allCircleText.includes('chemical')) {
+            topicScore += 15
+            matchedTerms.push('chemistry subject match')
+          }
+        }
+        
+        if (topicScore > 0) {
+          score += topicScore
+          reasons.push(`Subject relevance: ${matchedTerms.join(', ')}`)
         }
 
         // Tag overlap scoring
@@ -166,9 +211,14 @@ serve(async (req) => {
             })
 
             const avgSimilarity = similarities.reduce((sum, sim) => sum + sim, 0) / similarities.length
-            if (avgSimilarity > 0.7) {
+            // Lower threshold from 0.7 to 0.5 for more matches
+            if (avgSimilarity > 0.5) {
               score += avgSimilarity * 20
               reasons.push(`Content similarity: ${(avgSimilarity * 100).toFixed(1)}% match`)
+            } else if (avgSimilarity > 0.3) {
+              // Give partial credit for moderate similarity
+              score += avgSimilarity * 10
+              reasons.push(`Moderate content similarity: ${(avgSimilarity * 100).toFixed(1)}% match`)
             }
           }
         }
@@ -185,9 +235,19 @@ serve(async (req) => {
 
         // Member count factor (not too empty, not too overwhelming)
         const memberCount = circle.circle_members?.[0]?.count || 0
+        if (memberCount >= 1) {
+          score += 3 // Give points for any active circle
+          reasons.push(`Active circle: ${memberCount} members`)
+        }
         if (memberCount >= 3 && memberCount <= 50) {
-          score += 5
+          score += 2 // Bonus for good size
           reasons.push(`Good size: ${memberCount} members`)
+        }
+
+        // Give basic points for being a public circle (fallback scoring)
+        if (score === 0) {
+          score += 1
+          reasons.push('Available public circle')
         }
 
         return {
@@ -201,7 +261,10 @@ serve(async (req) => {
     )
 
     // Sort by score and take top suggestions
-    const topSuggestions = circleScores
+    console.log('Circle scores before filtering:', circleScores.map(c => ({ name: c.name, score: c.score, reasons: c.reasons })))
+    
+    // If no circles have scores > 0, just return some popular public circles
+    let topSuggestions = circleScores
       .filter(circle => circle.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
@@ -214,6 +277,26 @@ serve(async (req) => {
         reasons: circle.reasons,
         similarity_reason: circle.reasons.join(', ')
       }))
+
+    // Fallback: if no scored suggestions, return some active public circles
+    if (topSuggestions.length === 0) {
+      console.log('No scored suggestions found, returning fallback suggestions')
+      topSuggestions = circleScores
+        .filter(circle => circle.member_count >= 1) // At least 1 member
+        .sort((a, b) => b.member_count - a.member_count) // Sort by member count
+        .slice(0, 5)
+        .map(circle => ({
+          id: circle.id,
+          name: circle.name,
+          member_count: circle.member_count,
+          recent_activity: circle.recent_activity,
+          score: 1, // Give them a basic score
+          reasons: ['Popular public circle'],
+          similarity_reason: 'Popular public circle'
+        }))
+    }
+
+    console.log('Top suggestions after filtering:', topSuggestions)
 
     return new Response(
       JSON.stringify({ 

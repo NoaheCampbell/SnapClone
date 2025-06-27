@@ -128,11 +128,12 @@ export default function FriendsScreen() {
         })
       })
 
+      const result = await response.json()
+
       if (response.ok) {
-        const result = await response.json()
         setCircleSuggestions(result.suggestions || [])
       } else {
-        console.error('Failed to load circle suggestions')
+        console.error('Failed to load circle suggestions:', result)
         setCircleSuggestions([])
       }
     } catch (error) {
