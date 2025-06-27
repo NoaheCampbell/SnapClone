@@ -7,11 +7,13 @@ import {
   SafeAreaView,
   ScrollView,
   ActivityIndicator,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { WebView } from 'react-native-webview';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 interface ConceptMapModalProps {
   visible: boolean;
@@ -29,10 +31,28 @@ export default function ConceptMapModal({
   const [conceptMapData, setConceptMapData] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showTextView, setShowTextView] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
 
   useEffect(() => {
     if (visible && sprintId) {
       loadConceptMap();
+      // Allow landscape orientation when modal is open
+      ScreenOrientation.unlockAsync();
+      
+      // Listen for orientation changes
+      const subscription = ScreenOrientation.addOrientationChangeListener((event) => {
+        setIsLandscape(
+          event.orientationInfo.orientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+          event.orientationInfo.orientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
+        );
+      });
+      
+      return () => {
+        // Lock back to portrait when modal closes
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        ScreenOrientation.removeOrientationChangeListener(subscription);
+      };
     }
   }, [visible, sprintId]);
 
@@ -40,16 +60,18 @@ export default function ConceptMapModal({
     setLoading(true);
     try {
       // Check if concept map already exists
-      const { data: summary, error } = await supabase
+      const { data: summaries, error } = await supabase
         .from('summaries')
         .select('concept_map_data, bullets, tags')
-        .eq('sprint_id', sprintId)
-        .single();
+        .eq('sprint_id', sprintId);
 
       if (error) {
         console.error('Error loading concept map:', error);
         return;
       }
+
+      // Handle case where no summary exists or multiple summaries exist
+      const summary = summaries && summaries.length > 0 ? summaries[0] : null;
 
       if (summary?.concept_map_data) {
         setConceptMapData(summary.concept_map_data);
@@ -68,14 +90,21 @@ export default function ConceptMapModal({
     setGenerating(true);
     try {
       // Get summary data first
-      const { data: summary, error: summaryError } = await supabase
+      const { data: summaries, error: summaryError } = await supabase
         .from('summaries')
         .select('bullets, tags')
-        .eq('sprint_id', sprintId)
-        .single();
+        .eq('sprint_id', sprintId);
 
-      if (summaryError || !summary) {
-        Alert.alert('Error', 'Could not find summary data for this sprint.');
+      if (summaryError) {
+        console.error('Error fetching summary:', summaryError);
+        Alert.alert('Error', 'Could not load summary data for this sprint.');
+        return;
+      }
+
+      const summary = summaries && summaries.length > 0 ? summaries[0] : null;
+      
+      if (!summary) {
+        Alert.alert('Notice', 'No summary found for this sprint. Please complete the sprint first.');
         return;
       }
 
@@ -108,37 +137,48 @@ export default function ConceptMapModal({
     }
   };
 
-  const parseMermaidToText = (mermaidCode: string): string => {
-    if (!mermaidCode) return '';
+  const parseMermaidToText = (mermaidCode: string): { concepts: string[], relationships: string[] } => {
+    if (!mermaidCode) return { concepts: [], relationships: [] };
     
-    // Simple parsing to extract node information and connections
+    // Parse Mermaid diagram to extract structured information
     const lines = mermaidCode.split('\n').filter(line => line.trim());
     const nodes: { [key: string]: string } = {};
-    const connections: string[] = [];
+    const relationships: string[] = [];
+    const concepts = new Set<string>();
     
     lines.forEach(line => {
       const trimmed = line.trim();
       
-      // Extract node definitions (A[Label], B((Label)), etc.)
-      const nodeMatch = trimmed.match(/(\w+)\[(.*?)\]|\w+\(\((.*?)\)\)/);
+      // Extract node definitions (A[Label], B((Label)), C{Label}, etc.)
+      const nodeMatch = trimmed.match(/(\w+)\[(.*?)\]|(\w+)\(\((.*?)\)\)|(\w+)\{(.*?)\}/);
       if (nodeMatch) {
-        const nodeId = nodeMatch[1];
-        const label = nodeMatch[2] || nodeMatch[3];
+        const nodeId = nodeMatch[1] || nodeMatch[3] || nodeMatch[5];
+        const label = nodeMatch[2] || nodeMatch[4] || nodeMatch[6];
         if (nodeId && label) {
-          nodes[nodeId] = label;
+          nodes[nodeId] = label.replace(/"/g, '');
+          concepts.add(label.replace(/"/g, ''));
         }
       }
       
-      // Extract connections (A --> B, A -.-> B, etc.)
-      const connectionMatch = trimmed.match(/(\w+)\s*[-\.]*>\s*(\w+)/);
+      // Extract connections with labels (A -->|label| B, A -.-> B, etc.)
+      const connectionMatch = trimmed.match(/(\w+)\s*[-\.]*>(?:\|(.*?)\|)?\s*(\w+)/);
       if (connectionMatch) {
         const from = nodes[connectionMatch[1]] || connectionMatch[1];
-        const to = nodes[connectionMatch[2]] || connectionMatch[2];
-        connections.push(`${from} → ${to}`);
+        const to = nodes[connectionMatch[3]] || connectionMatch[3];
+        const label = connectionMatch[2];
+        
+        if (label) {
+          relationships.push(`• ${from} ${label} ${to}`);
+        } else {
+          relationships.push(`• ${from} connects to ${to}`);
+        }
       }
     });
     
-    return connections.join('\n');
+    return {
+      concepts: Array.from(concepts),
+      relationships
+    };
   };
 
   // Helper to wrap Mermaid code in an HTML document the WebView can render
@@ -159,28 +199,58 @@ export default function ConceptMapModal({
     </html>
   `;
 
+  const handleClose = () => {
+    // Ensure we lock back to portrait when closing
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    setShowTextView(false);
+    onClose();
+  };
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      supportedOrientations={['portrait', 'landscape']}
     >
       <SafeAreaView className="flex-1 bg-black">
         {/* Header */}
-        <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
-          <TouchableOpacity onPress={onClose}>
+        <View className={`flex-row items-center justify-between p-4 border-b border-gray-800 ${isLandscape ? 'pt-2 pb-2' : ''}`}>
+          <TouchableOpacity onPress={handleClose}>
             <Text className="text-blue-400 text-lg">Close</Text>
           </TouchableOpacity>
           <Text className="text-white text-lg font-semibold">Concept Map</Text>
-          <View className="w-12" />
+          {conceptMapData ? (
+            <TouchableOpacity 
+              onPress={() => setShowTextView(!showTextView)}
+              className="flex-row items-center"
+            >
+              <Feather 
+                name={showTextView ? 'map' : 'file-text'} 
+                size={20} 
+                color="#3B82F6" 
+              />
+              {!isLandscape && (
+                <Text className="text-blue-400 text-sm ml-1">
+                  {showTextView ? 'Map' : 'Text'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 60 }} />
+          )}
         </View>
 
         {/* Content */}
-        <View className="flex-1 p-4">
-          <Text className="text-white text-xl font-semibold mb-2">{sprintTopic}</Text>
-          <Text className="text-gray-400 text-sm mb-4">
-            Visual representation of concepts and their relationships
-          </Text>
+        <View className={`flex-1 ${isLandscape ? 'p-2' : 'p-4'}`}>
+          {!isLandscape && (
+            <>
+              <Text className="text-white text-xl font-semibold mb-2">{sprintTopic}</Text>
+              <Text className="text-gray-400 text-sm mb-4">
+                {showTextView ? 'Structured breakdown of concepts' : 'Visual representation of concepts and their relationships'}
+              </Text>
+            </>
+          )}
 
           {loading ? (
             <View className="flex-1 justify-center items-center">
@@ -188,20 +258,64 @@ export default function ConceptMapModal({
               <Text className="text-gray-400 mt-2">Loading concept map...</Text>
             </View>
           ) : conceptMapData ? (
-            <View className="flex-1">
-              <WebView
-                originWhitelist={["*"]}
-                source={{ html: generateMermaidHTML(conceptMapData) }}
-                style={{ flex: 1, backgroundColor: 'transparent' }}
-                javaScriptEnabled
-                scrollEnabled={true}
-              />
-              <View className="bg-gray-800 rounded-lg p-3">
-                <Text className="text-gray-400 text-xs text-center">
-                  💡 This concept map is generated from your study history using Retrieval-Augmented Generation
-                </Text>
+            showTextView ? (
+              // Text View
+              <ScrollView className="flex-1">
+                <View className="bg-gray-900 rounded-lg p-4 mb-4">
+                  <Text className="text-blue-400 text-lg font-semibold mb-3">
+                    📚 Key Concepts
+                  </Text>
+                  {parseMermaidToText(conceptMapData).concepts.map((concept, index) => (
+                    <View key={index} className="flex-row items-start mb-2">
+                      <Text className="text-blue-400 mr-2">•</Text>
+                      <Text className="text-white flex-1">{concept}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View className="bg-gray-900 rounded-lg p-4 mb-4">
+                  <Text className="text-green-400 text-lg font-semibold mb-3">
+                    🔗 Relationships & Connections
+                  </Text>
+                  {parseMermaidToText(conceptMapData).relationships.map((rel, index) => (
+                    <Text key={index} className="text-gray-300 mb-2 leading-5">
+                      {rel}
+                    </Text>
+                  ))}
+                </View>
+
+                <View className="bg-gray-800 rounded-lg p-3 mb-4">
+                  <View className="flex-row items-center mb-2">
+                    <Feather name="info" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+                    <Text className="text-gray-400 text-sm font-semibold">How to Use This</Text>
+                  </View>
+                  <Text className="text-gray-400 text-xs leading-5">
+                    • Review key concepts to reinforce your understanding{'\n'}
+                    • Study the relationships to see how ideas connect{'\n'}
+                    • Rotate your device for a better view of the visual map{'\n'}
+                    • Use this to prepare for quizzes and exams
+                  </Text>
+                </View>
+              </ScrollView>
+            ) : (
+              // Map View
+              <View className="flex-1">
+                <WebView
+                  originWhitelist={["*"]}
+                  source={{ html: generateMermaidHTML(conceptMapData) }}
+                  style={{ flex: 1, backgroundColor: 'transparent' }}
+                  javaScriptEnabled
+                  scrollEnabled={true}
+                />
+                {!isLandscape && (
+                  <View className="bg-gray-800 rounded-lg p-3 mt-2">
+                    <Text className="text-gray-400 text-xs text-center">
+                      💡 Rotate your device for a better view • Generated from your study history
+                    </Text>
+                  </View>
+                )}
               </View>
-            </View>
+            )
           ) : (
             <View className="flex-1 justify-center items-center px-8">
               <Feather name="map" size={64} color="gray" />
