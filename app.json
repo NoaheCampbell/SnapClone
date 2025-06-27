@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/sprintloop.png",
     "scheme": "snapclone",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/sprintloop.png",

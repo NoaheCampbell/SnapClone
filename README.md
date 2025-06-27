@@ -1,53 +1,65 @@
-# SnapClone 📸
+# SprintLoop - Study Sprint App 📚
 
-A modern, feature-rich social media app built with React Native and Expo, inspired by Snapchat. SnapClone allows users to capture photos, apply filters, add text overlays, share stories, and connect with friends.
+A collaborative study app built with React Native and Expo that helps students stay focused and motivated through timed study sprints, AI-powered quizzes, and social accountability.
 
 ## ✨ Features
 
-### 📷 Camera & Media
-- **Real-time Camera**: Live camera preview with front/back camera switching
-- **Photo Filters**: Multiple built-in filters including B&W, vintage, and color effects
-- **Text Overlays**: Add, edit, and drag text with customizable colors, sizes, and fonts
-- **Flash Control**: Toggle flash on/off for better photos
-- **Photo Capture**: High-quality photo capture with filter and overlay application
+### 🏃‍♀️ Study Sprints
+- **Timed Focus Sessions**: Create 1-180 minute study sprints with specific topics and goals
+- **Sprint Photos**: Capture start/end photos to document your progress
+- **Join Others**: See and join active sprints from your study circles
+- **Threading**: Sprint messages create discussion threads for collaboration
 
-### 👥 Social Features
-- **Stories**: Share photos as stories that are visible to friends
-- **Friends System**: Add friends, send/receive friend requests
-- **Privacy Controls**: Private accounts, friend request settings, story visibility
-- **Direct Messaging**: Send photos directly to friends
-- **User Profiles**: Customizable profiles with avatars and display names
+### 👥 Study Circles
+- **Private Groups**: Create circles for your study groups or classes
+- **Public Discovery**: Find and join public study circles
+- **Sprint Tracking**: See active sprints and member participation
+- **Circle Streaks**: Track consecutive days of 60%+ member participation
 
-### 🔐 Authentication & Security
-- **Secure Authentication**: Email/password authentication via Supabase
-- **Profile Creation**: Custom usernames and display names
-- **Privacy Settings**: Control who can see your content and send friend requests
-- **Secure Storage**: API keys and sensitive data stored securely
+### 🧠 AI-Powered Learning
+- **Auto-Generated Quizzes**: Get AI-generated quizzes based on your sprint topic and goals
+- **Concept Maps**: Visual concept maps generated from your study session
+- **Performance Tracking**: Track quiz scores and identify knowledge gaps
+- **Smart Suggestions**: Get personalized topic suggestions based on your history
+
+### 🔥 Gamification & Streaks
+- **Personal Streaks**: Track consecutive study days with freeze tokens
+- **Circle Streaks**: Group accountability through collective streaks
+- **Achievements**: Earn freeze tokens every 7-day streak
+- **Reminders**: Daily push notifications to maintain streaks
+
+### 💬 Real-time Chat
+- **Circle Messaging**: Chat with study group members
+- **Photo Sharing**: Share study materials and progress photos
+- **Auto-Expiring Messages**: Messages expire after 24 hours to keep focus on current work
+- **Message Reactions**: React with 👍🔥📚 emojis
 
 ### 🎨 Modern UI/UX
-- **Dark Theme**: Beautiful dark theme with modern design
-- **Gesture Controls**: Intuitive tap-to-edit and drag-to-move text overlays
-- **Smooth Animations**: Powered by React Native Reanimated
+- **Dark Theme**: Eye-friendly dark mode for late-night study sessions
+- **Smooth Animations**: Gesture-based interactions and transitions
+- **Camera Integration**: Built-in camera for sprint photos
 - **Responsive Design**: Works seamlessly on iOS and Android
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React Native with Expo
-- **Routing**: Expo Router (file-based routing)
+- **Frontend**: React Native with Expo SDK 51
+- **Routing**: Expo Router v3 (file-based routing)
 - **Styling**: NativeWind (Tailwind CSS for React Native)
-- **Backend**: Supabase (PostgreSQL database, authentication, storage)
-- **State Management**: Zustand
+- **Backend**: Supabase (PostgreSQL, Auth, Realtime, Storage)
+- **AI Services**: OpenAI GPT-4 for quiz and concept map generation
+- **State Management**: React Context API
 - **Animations**: React Native Reanimated & Gesture Handler
-- **Image Processing**: React Native Skia, Photo Manipulator
 - **Camera**: Expo Camera
+- **Push Notifications**: Expo Notifications
 
-## 📱 Quick Start with Expo Go
+## 📱 Quick Start
 
 ### Prerequisites
 - Node.js (v18 or later)
 - npm or yarn
-- Expo Go app on your phone ([iOS](https://apps.apple.com/app/expo-go/id982107779) | [Android](https://play.google.com/store/apps/details?id=host.exp.exponent))
+- (Recommended) Expo Go app on your phone ([iOS](https://apps.apple.com/app/expo-go/id982107779) | [Android](https://play.google.com/store/apps/details?id=host.exp.exponent))
 - Supabase account
+- OpenAI API key (for AI features)
 
 ### 1. Clone the Repository
 ```bash
@@ -58,43 +70,61 @@ cd SnapClone
 ### 2. Install Dependencies
 ```bash
 npm install
-# or
-yarn install
 ```
 
 ### 3. Set Up Supabase
 
 #### Create a Supabase Project
 1. Go to [supabase.com](https://supabase.com) and create a new project
-2. Note your project URL and anon key from the project settings
+2. Save your project URL and anon key from Settings → API
 
 #### Configure Database
-1. In your Supabase dashboard, go to the SQL Editor
-2. **Option A**: Run the complete schema migration file:
-   - `20250101200000_create_complete_schema.sql`
-   - This creates all tables, indexes, RLS policies, and functions in one go
-   
+1. In Supabase dashboard, go to SQL Editor
+2. Run the complete schema migration:
+   ```sql
+   -- Copy and paste contents of:
+   -- supabase/migrations/20250125000000_complete_consolidated_schema.sql
+   ```
+   This creates all tables, functions, indexes, and cron jobs
+
 #### Configure Authentication
-1. In Supabase dashboard, go to Authentication → Providers
-2. **Important**: Turn OFF "Confirm email" for the Email provider
-3. Configure any additional auth providers if needed
+1. Go to Authentication → Providers
+2. Enable Email provider
+3. **Important**: Turn OFF "Confirm email" for development
+4. Configure any additional providers (Google, etc.) if needed
 
 #### Set Up Storage
-1. Go to Storage in your Supabase dashboard
-2. Create the following buckets:
-   - `chat-media` (for avatars and chat images)
-   - `stories` (for story content)
-3. Set appropriate policies for public access
+1. Go to Storage and create these buckets:
+   - `chat-media` (for sprint photos and chat images)
+   - `sprints` (for sprint photos)
+2. Set bucket to public or configure RLS policies as needed
 
-### 4. Configure Environment Variables
+#### Deploy Edge Functions
+1. Install Supabase CLI:
+   ```bash
+   npm install -g supabase
+   ```
+2. Link your project:
+   ```bash
+   supabase link --project-ref YOUR_PROJECT_REF
+   ```
+3. Set Edge Function secrets:
+   ```bash
+   supabase secrets set OPENAI_API_KEY=your_openai_api_key
+   ```
+4. Deploy all Edge Functions:
+   ```bash
+   supabase functions deploy
+   ```
 
-Create a `lib/supabase.ts` file with your Supabase credentials:
+### 4. Configure Environment
 
+Create or update `lib/supabase.ts`:
 ```typescript
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'YOUR_SUPABASE_URL'
+const supabaseUrl = 'YOUR_SUPABASE_PROJECT_URL'
 const supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -106,41 +136,17 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 ```
-### 5. Open in Expo Go
-1. Open the Expo Go app on your phone
-2. Scan the QR code displayed in your terminal/browser
-3. The app will load on your device
 
-## 🚀 Development Setup
-
-### For Full Development (with simulators)
+### 5. Start Development
 ```bash
-# Install Expo CLI globally
-npm install -g @expo/cli
-
-# Start development server
+# Start Expo development server
 npx expo start
 
-# Run on iOS simulator (macOS only)
+# For iOS Simulator (Mac only)
 npx expo run:ios
 
-# Run on Android emulator
+# For Android Emulator
 npx expo run:android
-```
-
-### Building for Production
-```bash
-# Install EAS CLI
-npm install -g @expo/eas-cli
-
-# Configure EAS
-eas build:configure
-
-# Build for iOS
-eas build --platform ios
-
-# Build for Android
-eas build --platform android
 ```
 
 ## 📁 Project Structure
@@ -149,90 +155,127 @@ eas build --platform android
 SnapClone/
 ├── src/
 │   ├── app/                    # Expo Router pages
-│   │   ├── (auth)/            # Authentication screens
-│   │   ├── (modals)/          # Modal screens
-│   │   ├── (tabs)/            # Main tab screens
-│   │   └── stories/           # Story viewing screens
+│   │   ├── (auth)/            # Auth screens (login, signup, profile)
+│   │   ├── (modals)/          # Modal screens (chat, settings, etc.)
+│   │   ├── (tabs)/            # Main tabs (sprints, circles, inbox)
+│   │   └── index.tsx          # Root redirect
 │   ├── components/            # Reusable components
-│   ├── contexts/              # React contexts (Auth, etc.)
-│   ├── lib/                   # Utilities and configurations
-│   └── types/                 # TypeScript type definitions
-├── assets/                    # Images, fonts, and other assets
-├── supabase/                  # Database migrations and policies
+│   │   ├── SprintCamera.tsx   # Sprint photo capture
+│   │   ├── QuizModal.tsx      # AI quiz interface
+│   │   └── ConceptMapModal.tsx # Concept map viewer
+│   ├── contexts/              # React contexts
+│   └── lib/                   # Utilities and helpers
+├── supabase/
+│   ├── migrations/            # Database schema
+│   └── functions/             # Edge Functions
+│       ├── generateGapAwareQuiz/
+│       ├── generateConceptMap/
+│       ├── updateStreaksDaily/
+│       └── sendStreakReminders/
+├── assets/                    # Images and fonts
 └── docs/                      # Documentation
 ```
 
 ## 🔧 Configuration
 
-### Camera Permissions
-The app requires camera permissions to function properly. These are automatically requested when the app starts.
+### Database Cron Jobs
+The following cron jobs are automatically set up:
+- **Message Cleanup**: Runs every minute to delete expired messages
+- **Sprint Completion**: Runs every 5 minutes to mark completed sprints
+- **Daily Streaks**: Runs at 02:05 UTC to update user and circle streaks
+- **Streak Reminders**: Runs at 18:00 UTC to send push notifications
 
-### Storage Permissions
-Media library permissions are required to save photos. These are requested when needed.
+### Push Notifications
+1. Configure Expo push notifications in `app.json`
+2. Users need to allow notifications when prompted
+3. Push tokens are automatically saved to user profiles
 
-### API Keys (Optional)
-For AI chat suggestions, you can add an OpenAI API key:
-1. Go to Settings in the app
-2. Tap "Manage API Key"
-3. Enter your OpenAI API key
+### OpenAI Integration
+The app uses OpenAI for:
+- Generating quiz questions based on study topics
+- Creating concept maps from study sessions
+- Suggesting next study topics
+
+## 🚀 Deployment
+
+### Building for Production
+
+1. Install EAS CLI:
+   ```bash
+   npm install -g eas-cli
+   ```
+
+2. Configure EAS:
+   ```bash
+   eas build:configure
+   ```
+
+3. Update `app.json` with your bundle identifier
+
+4. Build:
+   ```bash
+   # iOS
+   eas build --platform ios
+
+   # Android  
+   eas build --platform android
+   ```
+
+### Environment Variables
+For production builds, set these in EAS secrets:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-**"Metro bundler error"**
-```bash
-npx expo start --clear
-```
+**"Streaks not updating"**
+- Check that the `last_completed_local_date` field exists in the streaks table
+- Verify cron jobs are running in Supabase dashboard
+- Ensure Edge Functions are deployed
+
+**"Threading not working"**
+- Verify `thread_root_id` is properly set on messages
+- Check that sprint messages are creating root threads
+- Look for errors in Supabase logs
+
+**"Quiz generation failing"**
+- Verify OpenAI API key is set in Edge Function secrets
+- Check Edge Function logs for errors
+- Ensure sprint has topic and goals defined
 
 **"Camera not working"**
-- Ensure camera permissions are granted
-- Try restarting the Expo Go app
-- Check that your device has a camera
-
-**"Supabase connection issues"**
-- Verify your Supabase URL and keys in `lib/supabase.ts`
-- Check that your Supabase project is active
-- Ensure RLS policies are properly configured
-
-**"Text overlays not responding"**
-- This is a known issue being worked on
-- Try tapping more firmly or multiple times
-- Restart the app if gestures stop working
+- Grant camera permissions when prompted
+- For iOS: Check Settings → Privacy → Camera
+- For Android: Check App Info → Permissions
 
 ### Development Tips
 
-1. **Use Expo Go for quick testing** - fastest way to see changes
-2. **Use development builds for native features** - when you need custom native code
-3. **Check Supabase logs** - for backend debugging
-4. **Use React Native Debugger** - for advanced debugging
-
-## 📖 Documentation
-
-- [Expo Documentation](https://docs.expo.dev/)
-- [React Native Documentation](https://reactnative.dev/docs/getting-started)
-- [Supabase Documentation](https://supabase.com/docs)
-- [NativeWind Documentation](https://www.nativewind.dev/)
+1. **Use Expo Go** for rapid development
+2. **Check Supabase Logs** for database and Edge Function errors
+3. **Enable Realtime** for tables in Supabase dashboard
+4. **Test on real devices** for camera and push notifications
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
-- Expo team for the amazing development platform
-- Supabase for the backend infrastructure
-- React Native community for the excellent libraries
-- Snapchat for the inspiration
+- Expo team for the excellent development platform
+- Supabase for the real-time backend infrastructure
+- OpenAI for powering the AI features
+- React Native community for amazing libraries
 
 ---
 
-**Note**: This is a demo/learning project and not affiliated with Snapchat Inc. 
+**Note**: This is an educational project demonstrating modern mobile app development with AI integration. 

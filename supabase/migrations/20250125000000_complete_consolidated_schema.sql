@@ -11,6 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";     -- For gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";    -- For uuid_generate_v4()
 CREATE EXTENSION IF NOT EXISTS "pg_cron";      -- For scheduled jobs
 CREATE EXTENSION IF NOT EXISTS "vector";       -- For embeddings
+CREATE EXTENSION IF NOT EXISTS "pg_net";       -- For HTTP requests
 
 ------------------------------------------------------------
 -- 2. Drop existing objects (in reverse dependency order)
@@ -118,6 +119,7 @@ CREATE TABLE circle_invites (
   expires_at timestamptz,
   max_uses integer,
   uses_count integer DEFAULT 0,
+  is_active boolean DEFAULT true,
   created_at timestamptz DEFAULT now()
 );
 
@@ -219,6 +221,7 @@ CREATE TABLE streaks (
   best_len integer NOT NULL DEFAULT 0,
   freeze_tokens integer NOT NULL DEFAULT 1,
   token_regen_at timestamptz,
+  last_completed_local_date date,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 

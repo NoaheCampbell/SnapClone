@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Alert, Image, Switch, StyleSheet, ScrollView } from 'react-native';
-import ThemeToggle from '../../components/ThemeToggle';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,14 +8,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
-import { useColorScheme } from '../../../components/useColorScheme';
 import Colors from '../../../constants/Colors';
 import * as SecureStore from 'expo-secure-store';
 
 export default function SettingsModal() {
   const { signOut, profile, refreshProfile } = useAuth();
   const [uploading, setUploading] = useState(false);
-  const [isEnabled, setIsEnabled] = useState(false);
   const [privacySettings, setPrivacySettings] = useState({
     is_private: false,
     allow_friend_requests: true,
@@ -27,11 +24,6 @@ export default function SettingsModal() {
   const [hasApiKey, setHasApiKey] = useState(false);
 
   useEffect(() => {
-    const getCurrentTheme = async () => {
-      const colorScheme = useColorScheme();
-      setIsEnabled(colorScheme === 'dark');
-    };
-    getCurrentTheme();
     loadPrivacySettings();
     checkApiKey();
   }, []);
@@ -281,11 +273,6 @@ export default function SettingsModal() {
             </View>
           </View>
         )}
-
-        {/* Theme Toggle */}
-        <View className="p-4 border-b border-gray-800">
-          <ThemeToggle />
-        </View>
 
         {/* Privacy Settings */}
         <View className="p-4 border-b border-gray-800">
