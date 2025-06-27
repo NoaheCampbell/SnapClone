@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
@@ -47,6 +47,7 @@ export default function SprintsTab() {
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const flatListRef = useRef(null);
   const [showSprintModal, setShowSprintModal] = useState(false);
   const [selectedCircleId, setSelectedCircleId] = useState<string>('');
   const [sprintTopic, setSprintTopic] = useState('');
@@ -895,6 +896,13 @@ Return the response in this exact JSON format:
     
     const translateX = new Animated.Value(0);
     
+    // Clamp the translation to prevent excessive movement
+    const clampedTranslateX = translateX.interpolate({
+      inputRange: [-200, 0],
+      outputRange: [-200, 0],
+      extrapolate: 'clamp',
+    });
+    
     const onGestureEvent = Animated.event(
       [{ nativeEvent: { translationX: translateX } }],
       { useNativeDriver: true }
@@ -902,10 +910,10 @@ Return the response in this exact JSON format:
     
     const onHandlerStateChange = (event: any) => {
       if (event.nativeEvent.state === 5) { // END state
-        const { translationX } = event.nativeEvent;
+        const { translationX, velocityX } = event.nativeEvent;
         
-        if (canDelete && translationX < -100) {
-          // Swipe left far enough to delete
+        if (canDelete && translationX < -100 && velocityX < -500) {
+          // Swipe left far enough and fast enough to delete
           deleteSprint(item.id, item.topic);
         }
         
@@ -913,6 +921,8 @@ Return the response in this exact JSON format:
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          tension: 40,
+          friction: 10,
         }).start();
       }
     };
@@ -1044,8 +1054,12 @@ Return the response in this exact JSON format:
         <PanGestureHandler
           onGestureEvent={onGestureEvent}
           onHandlerStateChange={onHandlerStateChange}
+          activeOffsetX={-20}
+          failOffsetY={[-10, 10]}
+          shouldCancelWhenOutside={true}
+          enabled={canDelete}
         >
-          <Animated.View style={{ transform: [{ translateX }] }}>
+          <Animated.View style={{ transform: [{ translateX: clampedTranslateX }] }}>
             <SprintContent />
           </Animated.View>
         </PanGestureHandler>
@@ -1196,6 +1210,9 @@ Return the response in this exact JSON format:
                 loadData();
               }}
               contentContainerStyle={{ paddingBottom: 20 }}
+              scrollEnabled={true}
+              nestedScrollEnabled={true}
+              removeClippedSubviews={false}
             />
           ) : (
             <View className="flex-1 justify-center items-center px-8">
