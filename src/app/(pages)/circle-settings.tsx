@@ -420,7 +420,8 @@ export default function CircleSettingsScreen() {
 
               if (error) throw error;
 
-              router.back();
+              // Navigate to circles page (inbox) instead of just going back
+              router.replace('/(tabs)/inbox');
             } catch (error) {
               console.error('Error leaving circle:', error);
               Alert.alert('Error', 'Failed to leave circle');
