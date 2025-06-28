@@ -47,6 +47,7 @@ export default function SprintsTab() {
   const [showEndCamera, setShowEndCamera] = useState(false);
   const [endingSprintId, setEndingSprintId] = useState<string>('');
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
+  const [activeTab, setActiveTab] = useState<'start' | 'history'>('start');
 
   const params = useLocalSearchParams<{
     viewSprint?: string;
@@ -681,20 +682,38 @@ export default function SprintsTab() {
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
       onPress={() => navigateToCreateSprint(item.id)}
-      className="bg-gray-800 rounded-lg p-4 mb-3 mx-4"
+      className="bg-gray-800 rounded-xl p-6 mb-4 mx-4 shadow-lg"
+      activeOpacity={0.7}
     >
-      <View className="flex-row justify-between items-center">
+      <View className="flex-row justify-between items-center mb-3">
         <View className="flex-1">
-          <Text className="text-white font-semibold text-lg">{item.name}</Text>
-          <Text className="text-gray-400 text-sm">
-            {item.member_count} members • {item.active_sprints} active sprints • 🔥 {item.current_streak}
-          </Text>
+          <Text className="text-white font-bold text-xl mb-2">{item.name}</Text>
+          <View className="flex-row items-center space-x-4">
+            <View className="flex-row items-center bg-gray-700/50 px-3 py-1 rounded-full">
+              <Feather name="users" size={14} color="#9CA3AF" />
+              <Text className="text-gray-400 text-sm ml-1">{item.member_count} members</Text>
+            </View>
+            <View className="flex-row items-center bg-gray-700/50 px-3 py-1 rounded-full">
+              <Feather name="activity" size={14} color="#10B981" />
+              <Text className="text-green-400 text-sm ml-1">{item.active_sprints} active</Text>
+            </View>
+          </View>
         </View>
-        <View className="flex-row items-center">
-          <Feather name="zap" size={20} color="#10B981" />
-          <Text className="text-green-400 text-sm ml-1">Start Sprint</Text>
+        <View className="items-center">
+          <View className="bg-green-500/20 rounded-2xl px-6 py-4">
+            <Feather name="zap" size={28} color="#10B981" />
+          </View>
+          <Text className="text-green-400 text-sm font-medium mt-2">Start</Text>
         </View>
       </View>
+      {item.current_streak > 0 && (
+        <View className="border-t border-gray-700 pt-3">
+          <View className="flex-row items-center">
+            <Text className="text-gray-500 text-sm">Circle streak: </Text>
+            <Text className="text-yellow-400 text-sm font-medium">🔥 {item.current_streak} days</Text>
+          </View>
+        </View>
+      )}
     </TouchableOpacity>
   );
 
@@ -815,62 +834,111 @@ export default function SprintsTab() {
           </View>
         </View>
 
-        {/* Active Sprints Section */}
-        <View className="flex-1">
-          <View className="p-4 pb-2">
-            <Text className="text-white text-lg font-semibold">Recent Sprints</Text>
+        {/* Tab Navigation */}
+        <View className="px-4 pb-4">
+          <View className="flex-row bg-gray-900 rounded-xl p-1">
+            <TouchableOpacity
+              onPress={() => setActiveTab('start')}
+              className={`flex-1 py-3 px-4 rounded-lg ${
+                activeTab === 'start' ? 'bg-green-500' : 'bg-transparent'
+              }`}
+            >
+              <Text className={`text-center font-semibold ${
+                activeTab === 'start' ? 'text-white' : 'text-gray-400'
+              }`}>
+                Start Sprint
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('history')}
+              className={`flex-1 py-3 px-4 rounded-lg ${
+                activeTab === 'history' ? 'bg-blue-500' : 'bg-transparent'
+              }`}
+            >
+              <Text className={`text-center font-semibold ${
+                activeTab === 'history' ? 'text-white' : 'text-gray-400'
+              }`}>
+                Recent Sprints
+              </Text>
+            </TouchableOpacity>
           </View>
-          
-          {recentSprints.length > 0 ? (
-            <FlatList
-              data={recentSprints}
-              renderItem={renderSprint}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                loadData();
-              }}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              scrollEnabled={true}
-              nestedScrollEnabled={true}
-              removeClippedSubviews={false}
-            />
-          ) : (
-            <View className="flex-1 justify-center items-center px-8">
-              <Feather name="zap" size={64} color="gray" />
-              <Text className="text-gray-400 text-lg mt-4 text-center">
-                No recent sprints
-              </Text>
-              <Text className="text-gray-500 text-sm mt-2 text-center">
-                Start a sprint in one of your circles below
-              </Text>
+        </View>
+
+        {/* Content Area */}
+        {activeTab === 'start' ? (
+          /* Start Sprint Tab - My Circles */
+          <View className="flex-1">
+            <View className="p-4 pb-2">
+              <Text className="text-white text-lg font-semibold">Choose a Circle</Text>
+              <Text className="text-gray-400 text-sm mt-1">Select where you want to start your sprint</Text>
             </View>
-          )}
-        </View>
-
-        {/* AI Topic Suggestion Section */}
-
-
-        {/* My Circles Section */}
-        <View className="border-t border-gray-800">
-          <View className="p-4 pb-2">
-            <Text className="text-white text-lg font-semibold">My Circles</Text>
+            
+            {myCircles.length > 0 ? (
+              <FlatList
+                data={myCircles}
+                renderItem={renderCircle}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                ListEmptyComponent={
+                  <View className="flex-1 items-center justify-center px-8 py-20">
+                    <Feather name="users" size={48} color="gray" />
+                    <Text className="text-gray-400 text-lg mt-4 text-center">
+                      No circles yet
+                    </Text>
+                    <Text className="text-gray-500 text-sm mt-2 text-center">
+                      Join or create a circle to start sprinting
+                    </Text>
+                  </View>
+                }
+              />
+            ) : (
+              <View className="flex-1 items-center justify-center px-8">
+                <Feather name="users" size={48} color="gray" />
+                <Text className="text-gray-400 text-lg mt-4 text-center">
+                  No circles yet
+                </Text>
+                <Text className="text-gray-500 text-sm mt-2 text-center">
+                  Join or create a circle to start sprinting
+                </Text>
+              </View>
+            )}
           </View>
-          
-          <FlatList
-            data={myCircles}
-            renderItem={renderCircle}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            style={{ maxHeight: 140 }}
-            contentContainerStyle={{ paddingBottom: 10 }}
-          />
-        </View>
+        ) : (
+          /* Recent Sprints Tab */
+          <View className="flex-1">
+            <View className="p-4 pb-2">
+              <Text className="text-white text-lg font-semibold">Sprint History</Text>
+              <Text className="text-gray-400 text-sm mt-1">Your recent and active sprints</Text>
+            </View>
+            
+            {recentSprints.length > 0 ? (
+              <FlatList
+                data={recentSprints}
+                renderItem={renderSprint}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                refreshing={refreshing}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  loadData();
+                }}
+                contentContainerStyle={{ paddingBottom: 20 }}
+              />
+            ) : (
+              <View className="flex-1 justify-center items-center px-8">
+                <Feather name="clock" size={48} color="gray" />
+                <Text className="text-gray-400 text-lg mt-4 text-center">
+                  No recent sprints
+                </Text>
+                <Text className="text-gray-500 text-sm mt-2 text-center">
+                  Start a sprint to see it here
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
-
-
 
       {/* Sprint End Camera */}
       {showEndCamera && (
@@ -884,8 +952,6 @@ export default function SprintsTab() {
           />
         </View>
       )}
-
-
     </SafeAreaView>
     </GestureHandlerRootView>
   );

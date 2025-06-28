@@ -181,9 +181,9 @@ export default function DiscoverCirclesScreen() {
 
   const renderCircleItem = ({ item }: { item: PublicCircle }) => (
     <View className="p-4 border-b border-gray-800 bg-gray-900 mx-4 my-2 rounded-lg">
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="flex-1">
-          <View className="flex-row items-center mb-1">
+      <View className="flex-row items-start justify-between mb-3">
+        <View className="flex-1 pr-3">
+          <View className="flex-row items-center mb-1 flex-wrap">
             <Text className="text-white font-semibold text-lg">{item.name}</Text>
             <Feather name="globe" size={14} color="#10B981" style={{ marginLeft: 8 }} />
             {item.is_member && (
@@ -197,38 +197,40 @@ export default function DiscoverCirclesScreen() {
           </Text>
         </View>
         
-        {item.is_member ? (
-          <TouchableOpacity
-            onPress={() => {
-              router.back();
-              router.push(`/(pages)/chat?circleId=${item.id}`);
-            }}
-            className="bg-gray-600 px-4 py-2 rounded-lg"
-          >
-            <Text className="text-white font-semibold">Open</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={() => joinCircle(item.id)}
-            disabled={joining === item.id}
-            className="bg-blue-500 px-4 py-2 rounded-lg"
-          >
-            <Text className="text-white font-semibold">
-              {joining === item.id ? 'Joining...' : 'Join'}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <View className="ml-2">
+          {item.is_member ? (
+            <TouchableOpacity
+              onPress={() => {
+                router.back();
+                router.push(`/(pages)/chat?circleId=${item.id}`);
+              }}
+              className="bg-gray-600 px-4 py-2 rounded-lg min-w-[60px]"
+            >
+              <Text className="text-white font-semibold text-center">Open</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => joinCircle(item.id)}
+              disabled={joining === item.id}
+              className="bg-blue-500 px-4 py-2 rounded-lg min-w-[60px]"
+            >
+              <Text className="text-white font-semibold text-center">
+                {joining === item.id ? 'Joining...' : 'Join'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
       
       <View className="flex-row items-center justify-between">
-        <View className="flex-row items-center space-x-4">
-          <View className="flex-row items-center">
+        <View className="flex-row items-center">
+          <View className="flex-row items-center mr-4">
             <Feather name="users" size={14} color="#9CA3AF" />
             <Text className="text-gray-400 text-sm ml-1">
               {item.member_count} member{item.member_count !== 1 ? 's' : ''}
             </Text>
           </View>
-          <View className="flex-row items-center">
+          <View className="flex-row items-center mr-4">
             <Feather name="clock" size={14} color="#9CA3AF" />
             <Text className="text-gray-400 text-sm ml-1">
               {item.sprint_minutes}min sprints
@@ -259,11 +261,11 @@ export default function DiscoverCirclesScreen() {
       {/* Join by Invite Code */}
       <View className="p-4 border-b border-gray-800">
         <Text className="text-white text-lg font-bold mb-3">Join by Invite Code</Text>
-        <View className="flex-row items-center space-x-2">
+        <View className="flex-row items-center">
           <TextInput
             value={inviteCode}
             onChangeText={setInviteCode}
-            className="flex-1 bg-gray-800 text-white p-3 rounded-lg"
+            className="flex-1 bg-gray-800 text-white p-3 rounded-lg mr-3"
             placeholder="Enter invite code"
             placeholderTextColor="#9CA3AF"
             autoCapitalize="characters"
@@ -272,11 +274,11 @@ export default function DiscoverCirclesScreen() {
           <TouchableOpacity
             onPress={joinByInviteCode}
             disabled={joiningByCode || !inviteCode.trim()}
-            className={`px-6 py-3 rounded-lg ${
+            className={`px-6 py-3 rounded-lg min-w-[80px] ${
               inviteCode.trim() && !joiningByCode ? 'bg-blue-500' : 'bg-gray-600'
             }`}
           >
-            <Text className="text-white font-semibold">
+            <Text className="text-white font-semibold text-center">
               {joiningByCode ? 'Joining...' : 'Join'}
             </Text>
           </TouchableOpacity>
