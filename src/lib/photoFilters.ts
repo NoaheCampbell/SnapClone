@@ -56,6 +56,25 @@ export const photoFilters: FilterConfig[] = [
       backgroundColor: '#000000',
       opacity: 0.5,
     }
+  },
+  { 
+    id: 'vintage', 
+    name: 'Vintage', 
+    icon: 'camera',
+    overlayStyle: {
+      // Create a vintage effect with sepia-like overlay
+      backgroundColor: '#C4A574',
+      opacity: 0.3,
+    }
+  },
+  { 
+    id: 'negative', 
+    name: 'Negative', 
+    icon: 'image',
+    overlayStyle: {
+      backgroundColor: 'rgba(255, 255, 255, 1)',
+      mixBlendMode: 'difference' as const,
+    }
   }
 ];
 

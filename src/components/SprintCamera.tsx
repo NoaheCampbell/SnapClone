@@ -429,7 +429,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
         ref={cameraRef}
         style={{ flex: 1 }}
         facing={cameraType}
-        flash={flashMode}
+        enableTorch={flashMode === 'on'}
       />
     );
 
