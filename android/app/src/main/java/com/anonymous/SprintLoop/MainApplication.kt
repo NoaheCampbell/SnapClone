@@ -1,4 +1,4 @@
-package com.anonymous.SnapClone
+package com.anonymous.SprintLoop
 
 import android.app.Application
 import android.content.res.Configuration

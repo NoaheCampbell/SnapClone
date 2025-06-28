@@ -26,16 +26,10 @@
     <array>
       <dict>
         <key>CFBundleURLSchemes</key>
-                  <array>
-            <string>snapclone</string>
-            <string>com.anonymous.SprintLoop</string>
-          </array>
-      </dict>
-      <dict>
-        <key>CFBundleURLSchemes</key>
-                  <array>
-            <string>exp+snapclone</string>
-          </array>
+        <array>
+          <string>snapclone</string>
+          <string>com.anonymous.SprintLoop</string>
+        </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
@@ -86,7 +80,7 @@
       <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Automatic</string>
+    <string>Dark</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
   </dict>

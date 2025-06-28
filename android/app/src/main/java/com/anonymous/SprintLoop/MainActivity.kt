@@ -1,4 +1,4 @@
-package com.anonymous.SnapClone
+package com.anonymous.SprintLoop
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
