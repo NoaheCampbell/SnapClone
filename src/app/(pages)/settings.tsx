@@ -11,8 +11,8 @@ import * as FileSystem from 'expo-file-system';
 import Colors from '../../../constants/Colors';
 import * as SecureStore from 'expo-secure-store';
 
-export default function SettingsModal() {
-  const { signOut, profile, refreshProfile } = useAuth();
+export default function SettingsPage() {
+  const { user, signOut, profile, refreshProfile } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [privacySettings, setPrivacySettings] = useState({
     is_private: false,
@@ -360,7 +360,7 @@ export default function SettingsModal() {
 
         <TouchableOpacity
           style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }}
-          onPress={() => router.push('/(modals)/testEdge')}
+                          onPress={() => router.push('/(pages)/testEdge')}
         >
           <Feather name="tool" size={20} color={Colors.light.tint} style={{ marginRight: 8 }} />
           <Text style={{ fontSize: 16 }}>Developer Tools</Text>

@@ -51,8 +51,8 @@ export default function NewChatScreen() {
 
       if (memberError) throw memberError
 
-      // Navigate to the new circle
-      router.replace(`/(modals)/chat?circleId=${circleData.id}`)
+      // Navigate to chat
+      router.replace(`/(pages)/chat?circleId=${circleData.id}`)
     } catch (error) {
       console.error('Error creating circle:', error)
       Alert.alert('Error', 'Failed to create circle. Please try again.')

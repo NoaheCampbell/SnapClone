@@ -1,18 +1,15 @@
-import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useNavigation, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 
-export default function SendToModal() {
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['95%'], []);
-  const navigation = useNavigation();
-
+export default function SendToPage() {
+  const router = useRouter();
   const { uri } = useLocalSearchParams<{ uri?: string }>();
   const { user } = useAuth();
 
@@ -30,14 +27,7 @@ export default function SendToModal() {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    // Open sheet immediately (index 0 is our only snap point)
-    requestAnimationFrame(() => bottomSheetRef.current?.snapToIndex(0));
-
     fetchFriends();
-
-    return () => {
-      bottomSheetRef.current?.close();
-    };
   }, []);
 
   const fetchFriends = async () => {
@@ -137,7 +127,6 @@ export default function SendToModal() {
         throw upErr;
       }
 
-
       const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path);
 
       // ---------------------------------------------------------
@@ -155,11 +144,12 @@ export default function SendToModal() {
         }
       }
 
+      // Navigate back after successful send
+      router.back();
     } catch (e) {
       console.warn('send snap error', e);
     } finally {
       setSending(false);
-      bottomSheetRef.current?.close();
     }
   };
 
@@ -222,85 +212,91 @@ export default function SendToModal() {
   };
 
   return (
-    <View style={{ flex: 1 }} pointerEvents="box-none">
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      enableDynamicSizing={false}
-      snapPoints={snapPoints}
-      backdropComponent={useCallback(
-        (props: any) => (
-          <BottomSheetBackdrop {...props} disappearsOnIndex={-1} opacity={0.4} />
-        ),
-        []
-      )}
-      backgroundStyle={{ backgroundColor: '#1E1E1E' }}
-      handleIndicatorStyle={{ backgroundColor: 'white' }}
-      onClose={() => navigation.goBack()}
-    >
-      <BottomSheetView style={{ flex: 1, padding: 16 }}>
-        <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-white text-2xl font-bold">Send To</Text>
-            <TouchableOpacity onPress={() => bottomSheetRef.current?.close()}>
-                <Feather name="x" size={24} color="white" />
-            </TouchableOpacity>
+    <SafeAreaView className="flex-1 bg-gray-900">
+      <View className="flex-1">
+        {/* Header */}
+        <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
+          <Text className="text-white text-2xl font-bold">Send To</Text>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Feather name="x" size={24} color="white" />
+          </TouchableOpacity>
         </View>
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search friends..."
-          placeholderTextColor="gray"
-          className="bg-neutral-800 rounded-lg p-2 text-white mb-4"
-        />
-        {loading ? (
-          <ActivityIndicator size="large" color="#fff" />
-        ) : (
-          <FlatList
-            data={friends.filter((f) =>
-              (f.display_name || f.username || '')
-                .toLowerCase()
-                .includes(search.toLowerCase())
-            )}
-            keyExtractor={(item) => item.user_id}
-            renderItem={({ item }) => {
-              const isSelected = selectedIds.has(item.user_id);
-              return (
-                <TouchableOpacity
-                  onPress={() => toggleFriend(item.user_id)}
-                  className="flex-row items-center p-2"
-                >
-                  {item.avatar_url ? (
-                    <Image
-                      source={{ uri: item.avatar_url }}
-                      className="w-12 h-12 rounded-full mr-4"
-                    />
-                  ) : (
-                    <Image
-                      source={require('../../../assets/images/avatar-placeholder.png')}
-                      className="w-12 h-12 rounded-full mr-4"
-                      resizeMode="cover"
-                    />
-                  )}
-                  <Text className="text-white text-lg flex-1">
-                    {item.display_name || item.username}
-                  </Text>
-                  <View
-                    className={`w-6 h-6 rounded-full border-2 ${isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-gray-400'}`}
-                  />
-                </TouchableOpacity>
-              );
-            }}
+
+        {/* Search Bar */}
+        <View className="px-4 py-2">
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search friends..."
+            placeholderTextColor="gray"
+            className="bg-gray-800 rounded-lg p-3 text-white"
           />
-        )}
-        <TouchableOpacity
-          onPress={handleSend}
-          disabled={selectedCount() === 0 || sending}
-          className={`py-3 rounded-lg mt-4 ${selectedCount() > 0 ? 'bg-indigo-500' : 'bg-gray-500'}`}
-        >
-          <Text className="text-white text-center font-bold text-lg">{sending ? 'Sending...' : 'Send'}</Text>
-        </TouchableOpacity>
-      </BottomSheetView>
-    </BottomSheet>
-    </View>
+        </View>
+
+        {/* Friends List */}
+        <View className="flex-1">
+          {loading ? (
+            <View className="flex-1 justify-center items-center">
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          ) : (
+            <FlatList
+              data={friends.filter((f) =>
+                (f.display_name || f.username || '')
+                  .toLowerCase()
+                  .includes(search.toLowerCase())
+              )}
+              keyExtractor={(item) => item.user_id}
+              renderItem={({ item }) => {
+                const isSelected = selectedIds.has(item.user_id);
+                return (
+                  <TouchableOpacity
+                    onPress={() => toggleFriend(item.user_id)}
+                    className="flex-row items-center p-4 border-b border-gray-800"
+                  >
+                    {item.avatar_url ? (
+                      <Image
+                        source={{ uri: item.avatar_url }}
+                        className="w-12 h-12 rounded-full mr-4"
+                      />
+                    ) : (
+                      <Image
+                        source={require('../../../assets/images/avatar-placeholder.png')}
+                        className="w-12 h-12 rounded-full mr-4"
+                        resizeMode="cover"
+                      />
+                    )}
+                    <Text className="text-white text-lg flex-1">
+                      {item.display_name || item.username}
+                    </Text>
+                    <View
+                      className={`w-6 h-6 rounded-full border-2 ${
+                        isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-gray-400'
+                      }`}
+                    />
+                  </TouchableOpacity>
+                );
+              }}
+              contentContainerStyle={{ paddingBottom: 100 }}
+            />
+          )}
+        </View>
+
+        {/* Send Button */}
+        <View className="absolute bottom-0 left-0 right-0 p-4 bg-gray-900 border-t border-gray-800">
+          <TouchableOpacity
+            onPress={handleSend}
+            disabled={selectedCount() === 0 || sending}
+            className={`py-3 rounded-lg ${
+              selectedCount() > 0 ? 'bg-indigo-500' : 'bg-gray-600'
+            }`}
+          >
+            <Text className="text-white text-center font-bold text-lg">
+              {sending ? 'Sending...' : `Send${selectedCount() > 0 ? ` (${selectedCount()})` : ''}`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }

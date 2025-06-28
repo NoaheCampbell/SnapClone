@@ -101,7 +101,7 @@ export default function DiscoverCirclesScreen() {
             text: 'Open Circle',
             onPress: () => {
               router.back();
-              router.push(`/(modals)/chat?circleId=${circleId}`);
+              router.push(`/(pages)/chat?circleId=${circleId}`);
             }
           },
           { text: 'OK' }
@@ -146,7 +146,7 @@ export default function DiscoverCirclesScreen() {
             text: 'Open Circle',
             onPress: () => {
               router.back();
-              router.push(`/(modals)/chat?circleId=${data.circle_id}`);
+              router.push(`/(pages)/chat?circleId=${data.circle_id}`);
             }
           },
           { text: 'OK' }
@@ -201,7 +201,7 @@ export default function DiscoverCirclesScreen() {
           <TouchableOpacity
             onPress={() => {
               router.back();
-              router.push(`/(modals)/chat?circleId=${item.id}`);
+              router.push(`/(pages)/chat?circleId=${item.id}`);
             }}
             className="bg-gray-600 px-4 py-2 rounded-lg"
           >

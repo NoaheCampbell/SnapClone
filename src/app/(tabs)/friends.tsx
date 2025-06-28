@@ -1,9 +1,10 @@
-import { View, Text, FlatList, TouchableOpacity, Alert, Image, Modal, TextInput, ActivityIndicator, ScrollView } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert, Image, TextInput, ActivityIndicator, ScrollView } from 'react-native'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../../lib/supabase'
+import { useRouter } from 'expo-router'
 
 interface Profile {
   user_id: string
@@ -43,10 +44,10 @@ interface CircleSuggestion {
 
 export default function FriendsScreen() {
   const { user } = useAuth()
+  const router = useRouter()
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
   const [loading, setLoading] = useState(true)
-  const [showSearchModal, setShowSearchModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Profile[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -518,7 +519,7 @@ export default function FriendsScreen() {
                 <Text className="text-white text-xs font-bold">{friendRequests.length}</Text>
               </View>
               <TouchableOpacity 
-                onPress={() => setShowSearchModal(true)}
+                onPress={() => router.push('/(pages)/search-friends' as any)}
                 className="w-12 h-12 bg-yellow-500 rounded-full items-center justify-center"
               >
                 <Feather name="user-plus" size={20} color="white" />
@@ -527,7 +528,7 @@ export default function FriendsScreen() {
           )}
           {activeTab === 'friends' && (
             <TouchableOpacity 
-              onPress={() => setShowSearchModal(true)}
+              onPress={() => router.push('/(pages)/search-friends' as any)}
               className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
             >
               <Feather name="search" size={20} color="white" />
@@ -650,101 +651,6 @@ export default function FriendsScreen() {
           )
         )}
       </View>
-
-      {/* Search Modal */}
-      <Modal
-        visible={showSearchModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <SafeAreaView className="flex-1 bg-black">
-          {/* Modal Header */}
-          <View className="px-6 py-4 flex-row items-center justify-between border-b border-gray-800">
-            <Text className="text-white text-2xl font-bold">Search & Requests</Text>
-            <TouchableOpacity 
-              onPress={() => {
-                setShowSearchModal(false)
-                setSearchQuery('')
-                setSearchResults([])
-              }}
-              className="w-10 h-10 bg-gray-800 rounded-full items-center justify-center"
-            >
-              <Feather name="x" size={20} color="white" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Search Bar */}
-          <View className="px-6 py-4">
-            <View className="bg-gray-800 rounded-xl px-4 py-3 flex-row items-center">
-              <Feather name="search" size={20} color="gray" />
-              <TextInput
-                value={searchQuery}
-                onChangeText={(text) => {
-                  setSearchQuery(text)
-                  searchUsers(text)
-                }}
-                placeholder="Search for users..."
-                placeholderTextColor="gray"
-                className="flex-1 text-white text-lg ml-3"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-          </View>
-
-          {/* Content */}
-          <View className="flex-1">
-            {/* Friend Requests Section */}
-            {friendRequests.length > 0 && (
-              <View>
-                <Text className="text-white text-xl font-bold px-6 py-2">Friend Requests</Text>
-                <FlatList
-                  data={friendRequests}
-                  renderItem={renderFriendRequest}
-                  keyExtractor={(item) => item.id.toString()}
-                  showsVerticalScrollIndicator={false}
-                />
-              </View>
-            )}
-
-            {/* Search Results Section */}
-            {searchQuery.trim() !== '' && (
-              <View className="flex-1">
-                <Text className="text-white text-xl font-bold px-6 py-2">Search Results</Text>
-                {searchLoading ? (
-                  <View className="flex-1 items-center justify-center">
-                    <Text className="text-white text-lg">Searching...</Text>
-                  </View>
-                ) : searchResults.length === 0 ? (
-                  <View className="flex-1 items-center justify-center px-8">
-                    <Text className="text-gray-400 text-lg text-center">No users found</Text>
-                  </View>
-                ) : (
-                  <FlatList
-                    data={searchResults}
-                    renderItem={renderSearchResult}
-                    keyExtractor={(item) => item.user_id}
-                    showsVerticalScrollIndicator={false}
-                  />
-                )}
-              </View>
-            )}
-
-            {/* Empty State */}
-            {searchQuery.trim() === '' && friendRequests.length === 0 && (
-              <View className="flex-1 items-center justify-center px-8">
-                <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
-                  <Feather name="search" size={60} color="white" />
-                </View>
-                <Text className="text-white text-2xl font-bold text-center mb-4">Search for Friends</Text>
-                <Text className="text-gray-400 text-center text-lg">
-                  Type a username or display name to find people to connect with
-                </Text>
-              </View>
-            )}
-          </View>
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   )
 }

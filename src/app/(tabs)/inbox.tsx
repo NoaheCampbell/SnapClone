@@ -385,7 +385,7 @@ export default function InboxScreen() {
   }, [])
 
   const handleCirclePress = useCallback((circle: CirclePreview) => {
-    router.push(`/(modals)/chat?circleId=${circle.id}`)
+    router.push(`/(pages)/chat?circleId=${circle.id}`)
   }, [])
 
   const showCircleOptions = useCallback((circle: CirclePreview) => {
@@ -395,11 +395,11 @@ export default function InboxScreen() {
       [
         {
           text: 'Open Chat',
-          onPress: () => router.push(`/(modals)/chat?circleId=${circle.id}`)
+          onPress: () => router.push(`/(pages)/chat?circleId=${circle.id}`)
         },
         {
           text: 'Circle Settings',
-          onPress: () => router.push(`/(modals)/circle-settings?circleId=${circle.id}`)
+          onPress: () => router.push(`/(pages)/circle-settings?circleId=${circle.id}`)
         },
         {
           text: 'Cancel',
@@ -435,10 +435,10 @@ export default function InboxScreen() {
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
           <Text className="text-white text-xl font-bold">Circles</Text>
           <View className="flex-row items-center space-x-3">
-            <TouchableOpacity onPress={() => router.push('/(modals)/discover-circles')}>
+            <TouchableOpacity onPress={() => router.push('/(pages)/discover-circles')}>
               <Feather name="search" size={24} color="white" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/(modals)/new-chat')}>
+            <TouchableOpacity onPress={() => router.push('/(pages)/new-chat')}>
               <Feather name="plus-circle" size={24} color="white" />
             </TouchableOpacity>
           </View>
@@ -471,13 +471,13 @@ export default function InboxScreen() {
             </Text>
             <View className="flex-row space-x-3 mt-6">
               <TouchableOpacity 
-                onPress={() => router.push('/(modals)/new-chat')}
+                onPress={() => router.push('/(pages)/new-chat')}
                 className="bg-blue-500 px-6 py-3 rounded-full"
               >
                 <Text className="text-white font-semibold">Create Circle</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                onPress={() => router.push('/(modals)/discover-circles')}
+                onPress={() => router.push('/(pages)/discover-circles')}
                 className="bg-green-500 px-6 py-3 rounded-full"
               >
                 <Text className="text-white font-semibold">Discover</Text>

@@ -1,7 +1,6 @@
 import '../../global.css';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
@@ -37,26 +36,12 @@ export default function RootLayout() {
     <AuthProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          <BottomSheetModalProvider>
-            <AppStateHandler />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen 
-                name="(modals)/send-to" 
-                options={{ 
-                  presentation: 'modal', 
-                  animation: 'fade', 
-                  headerShown: false, 
-                  contentStyle: { backgroundColor: 'transparent' }, 
-                  gestureEnabled: false,
-                }} 
-              />
-              <Stack.Screen name="(modals)/settings" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="(modals)/chat" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="(modals)/new-chat" options={{ presentation: 'modal' }} />
-            </Stack>
-          </BottomSheetModalProvider>
+          <AppStateHandler />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="(pages)" />
+          </Stack>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </AuthProvider>

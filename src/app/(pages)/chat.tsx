@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, Modal, TouchableWithoutFeedback, ActivityIndicator } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, TouchableWithoutFeedback, ActivityIndicator } from 'react-native'
 import React, { useState, useEffect, useRef, memo, useCallback } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -475,10 +475,8 @@ export default function ChatScreen() {
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null)
   const [reactionsMap, setReactionsMap] = useState<Record<number, {emoji:string; user_id:string}[]>>({})
   const [joinedSprints, setJoinedSprints] = useState<string[]>([])
-  const [showThreadModal, setShowThreadModal] = useState(false)
-  const [threadMessages, setThreadMessages] = useState<Message[]>([])
-  const [threadRootMessage, setThreadRootMessage] = useState<Message | null>(null)
-  const [loadingThread, setLoadingThread] = useState(false)
+
+
   const [showJoinCamera, setShowJoinCamera] = useState(false)
   const [joinSprintData, setJoinSprintData] = useState<{
     sprintId: string;
@@ -487,8 +485,7 @@ export default function ChatScreen() {
     username: string;
   } | null>(null)
   const [participantAvatars, setParticipantAvatars] = useState<Record<string, string[]>>({})
-  const [threadNewMessage, setThreadNewMessage] = useState('')
-  const [sendingThreadMessage, setSendingThreadMessage] = useState(false)
+
   const [threadCounts, setThreadCounts] = useState<Record<number, number>>({})
   const messagesRef = useRef<Message[]>([])
 
@@ -763,7 +760,8 @@ export default function ChatScreen() {
           {
             event: 'UPDATE',
             schema: 'public',
-            table: 'messages'
+            table: 'messages',
+            filter: `circle_id=eq.${channelId}`
           },
           async (payload) => {
             const updated = payload.new as any;
@@ -774,11 +772,11 @@ export default function ChatScreen() {
             
             // Update thread counts separately to avoid re-rendering all messages
             // Check if join_count actually changed (handle undefined old value)
-            const oldCount = old?.join_count || 0;
-            const newCount = updated.join_count || 0;
+            const oldCount = old?.join_count || (updated.sprint_id ? 1 : 0);
+            const newCount = updated.join_count || (updated.sprint_id ? 1 : 0);
             
             // For sprint messages, always update the count even if going from undefined/1 to 2
-            if (updated.sprint_id && newCount !== oldCount) {
+            if (updated.sprint_id) {
               setThreadCounts(prev => ({ ...prev, [updated.id]: newCount }));
               
               // Also update the message in the messages array to force re-render
@@ -790,15 +788,20 @@ export default function ChatScreen() {
               if (newCount > oldCount) {
                 fetchParticipantAvatars(updated.sprint_id);
               }
+              
+              // Track joined sprints
+              if (newCount > 1) {
+                setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+              }
             }
             // For non-sprint messages, only track if count > 1
             else if (!updated.sprint_id && newCount > 1 && newCount !== oldCount) {
               setThreadCounts(prev => ({ ...prev, [updated.id]: newCount }));
-            }
-            
-            // Track joined sprints
-            if (updated.join_count > 1 && updated.sprint_id) {
-              setJoinedSprints(prev => prev.includes(updated.sprint_id) ? prev : [...prev, updated.sprint_id]);
+              
+              // Also update the message in the messages array for consistency
+              setMessages(prev => prev.map(msg => 
+                msg.id === updated.id ? { ...msg, join_count: newCount } : msg
+              ));
             }
           }
         )
@@ -1493,15 +1496,20 @@ export default function ChatScreen() {
         if (!messageError) {
           // Update join count on root message - force updated_at to trigger realtime
           const newJoinCount = (existingMessages.join_count || 1) + 1;
-          const { error: updateError } = await supabase
+          
+          const { data: updatedMessage, error: updateError } = await supabase
             .from('messages')
             .update({ 
               join_count: newJoinCount,
               updated_at: new Date().toISOString()
             })
-            .eq('id', existingMessages.id);
+            .eq('id', existingMessages.id)
+            .select()
+            .single();
             
-
+          if (updateError) {
+            console.error('[Sprint Join] Error updating join count:', updateError);
+          }
         }
       } else {
         // No root message, create one
@@ -1590,152 +1598,14 @@ export default function ChatScreen() {
   // -----------------------------------------------------------------
   const openThread = async (rootMessage: Message) => {
     if (!rootMessage.sprint_id) return;
-    
-    setLoadingThread(true);
-    setThreadRootMessage(rootMessage);
-    setShowThreadModal(true);
-    
-    try {
-      // Load all messages in this thread (including the root)
-      const { data, error } = await supabase
-        .from('messages')
-        .select(`
-          id, content, media_url, sprint_id, sender_id, created_at, join_count, thread_root_id,
-          profiles!messages_sender_id_fkey(username, avatar_url)
-        `)
-        .or(`id.eq.${rootMessage.id},thread_root_id.eq.${rootMessage.id}`)
-        .order('created_at', { ascending: true });
-        
-      if (error) throw error;
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      const processedMessages: Message[] = (data || []).map((msg: any) => ({
-        id: msg.id,
-        content: msg.content,
-        media_url: msg.media_url,
-        sprint_id: msg.sprint_id,
-        sender_id: msg.sender_id,
-        created_at: msg.created_at,
-        join_count: msg.join_count,
-        sender_name: msg.profiles.username,
-        avatar_url: msg.profiles.avatar_url,
-        is_own_message: msg.sender_id === user?.id,
-      }));
-      
-      setThreadMessages(processedMessages);
-    } catch (error) {
-      console.error('Error loading thread:', error);
-    } finally {
-      setLoadingThread(false);
-    }
+    router.push(`/(pages)/thread?messageId=${rootMessage.id}&circleId=${channelId}`);
   };
 
-  // Add useEffect for thread subscription
-  useEffect(() => {
-    if (!showThreadModal || !threadRootMessage) return;
-    
-    const threadSubscription = supabase
-      .channel(`thread:${threadRootMessage.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `thread_root_id=eq.${threadRootMessage.id}`
-        },
-        async (payload) => {
-          const newMessage = payload.new as any;
-          
-          // Get sender profile
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('username, avatar_url')
-            .eq('user_id', newMessage.sender_id)
-            .single();
-            
-          const { data: { user } } = await supabase.auth.getUser();
-          
-          const processedMessage: Message = {
-            id: newMessage.id,
-            content: newMessage.content,
-            media_url: newMessage.media_url,
-            sprint_id: newMessage.sprint_id,
-            sender_id: newMessage.sender_id,
-            created_at: newMessage.created_at,
-            join_count: newMessage.join_count,
-            sender_name: profile?.username || 'Unknown',
-            avatar_url: profile?.avatar_url,
-            is_own_message: newMessage.sender_id === user?.id,
-          };
-          
-          setThreadMessages(prev => [...prev, processedMessage]);
-        }
-      )
-      .subscribe();
-      
-    return () => {
-      threadSubscription.unsubscribe();
-    };
-  }, [showThreadModal, threadRootMessage?.id]);
 
 
 
-  const sendThreadMessage = async () => {
-    if (!threadNewMessage.trim() || sendingThreadMessage || !threadRootMessage) return;
-    
-    const messageText = threadNewMessage.trim();
-    setThreadNewMessage(''); // Clear input immediately
-    
-    try {
-      setSendingThreadMessage(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          circle_id: channelId,
-          sender_id: user.id,
-          content: messageText,
-          thread_root_id: threadRootMessage.id
-        });
-        
-      if (error) {
-        setThreadNewMessage(messageText); // Restore on error
-        throw error;
-      }
 
-      // Update root message join_count - force updated_at to trigger realtime
-      const newJoinCount = (threadRootMessage.join_count || 1) + 1;
-      const { error: updateError } = await supabase
-        .from('messages')
-        .update({ 
-          join_count: newJoinCount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', threadRootMessage.id);
-        
-      if (updateError) {
-        console.error('Error updating thread count:', updateError);
-      } else {
-        // Update local thread root message
-        setThreadRootMessage(prev => prev ? { ...prev, join_count: newJoinCount } : null);
-        
-        // Update thread count without re-rendering all messages
-        setThreadCounts(prev => ({ 
-          ...prev, 
-          [threadRootMessage.id]: newJoinCount 
-        }));
-      }
-    } catch (error) {
-      console.error('Error sending thread message:', error);
-      Alert.alert('Error', 'Failed to send message. Please try again.');
-    } finally {
-      setSendingThreadMessage(false);
-    }
-  };
+
 
   // Create memoized renderMessage function
   const renderMessage = useCallback(({ item }: { item: Message }) => {
@@ -1781,7 +1651,7 @@ export default function ChatScreen() {
         </Text>
         {/* All chats are now circles - show settings icon */}
         <TouchableOpacity 
-          onPress={() => router.push(`/(modals)/circle-settings?circleId=${channelId}`)}
+                          onPress={() => router.push(`/(pages)/circle-settings?circleId=${channelId}`)}
           className="mr-3"
         >
           <Feather name="settings" size={22} color="white" />
@@ -1919,217 +1789,9 @@ export default function ChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Add Members Modal */}
-      {showAddMembers && (
-        <View className="absolute inset-0 bg-black/50 justify-center items-center">
-          <View className="bg-gray-900 rounded-lg w-4/5 max-h-96">
-            <View className="flex-row items-center justify-between p-4 border-b border-gray-700">
-              <Text className="text-white text-lg font-semibold">Add Members</Text>
-              <TouchableOpacity onPress={() => {
-                setShowAddMembers(false)
-                setSelectedNewMembers([])
-              }}>
-                <Feather name="x" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-            
-            <View className="max-h-64">
-              <FlatList
-                data={availableFriends}
-                keyExtractor={(item) => item.user_id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedNewMembers(prev =>
-                        prev.includes(item.user_id)
-                          ? prev.filter(id => id !== item.user_id)
-                          : [...prev, item.user_id]
-                      )
-                    }}
-                    className="flex-row items-center p-4 border-b border-gray-800"
-                  >
-                    <View className="w-10 h-10 rounded-full bg-gray-600 items-center justify-center mr-3">
-                      <Feather name="user" size={18} color="white" />
-                    </View>
-                    <Text className="text-white flex-1">{item.username}</Text>
-                    <View className={`w-5 h-5 rounded-full border-2 items-center justify-center ${
-                      selectedNewMembers.includes(item.user_id) ? 'bg-blue-500 border-blue-500' : 'border-gray-400'
-                    }`}>
-                      {selectedNewMembers.includes(item.user_id) && (
-                        <Feather name="check" size={12} color="white" />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={() => (
-                  <View className="p-8 items-center">
-                    <Feather name="users" size={48} color="gray" />
-                    <Text className="text-gray-400 text-center mt-4">
-                      No friends available to add
-                    </Text>
-                    <Text className="text-gray-500 text-sm text-center mt-2">
-                      All your friends are already in this circle
-                    </Text>
-                  </View>
-                )}
-              />
-            </View>
 
-            <View className="p-4 border-t border-gray-700">
-              <TouchableOpacity
-                onPress={addMembersToCircle}
-                disabled={selectedNewMembers.length === 0 || addingMembers}
-                className={`py-3 rounded-lg items-center ${
-                  selectedNewMembers.length > 0 && !addingMembers ? 'bg-blue-500' : 'bg-gray-600'
-                }`}
-              >
-                <Text className="text-white font-semibold">
-                  {addingMembers ? 'Adding...' : `Add ${selectedNewMembers.length} Member${selectedNewMembers.length !== 1 ? 's' : ''}`}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
 
       <ReactionPicker />
-
-      {/* Thread Modal */}
-      <Modal
-        visible={showThreadModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <SafeAreaView className="flex-1 bg-black">
-          {/* Thread Header */}
-          <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
-            <TouchableOpacity onPress={() => {
-              setShowThreadModal(false);
-              setThreadMessages([]);
-              setThreadRootMessage(null);
-              setThreadNewMessage('');
-            }}>
-              <Feather name="x" size={24} color="white" />
-            </TouchableOpacity>
-            <Text className="text-white text-lg font-semibold">Thread</Text>
-            <View style={{ width: 24 }} />
-          </View>
-
-          {/* Thread Messages */}
-          {loadingThread ? (
-            <View className="flex-1 justify-center items-center">
-              <ActivityIndicator size="large" color="white" />
-            </View>
-          ) : (
-            <FlatList
-              data={threadMessages}
-              renderItem={({ item }) => (
-                <View className={`mb-3 mx-4 ${item.is_own_message ? 'items-end' : 'items-start'}`}>
-                  {!item.is_own_message ? (
-                    // Other user's message with avatar
-                    <View className="flex-row items-start space-x-2 max-w-[85%]">
-                      {/* Avatar */}
-                      <View className="w-8 h-8 rounded-full overflow-hidden bg-gray-600 flex-shrink-0 mt-1">
-                        {item.avatar_url ? (
-                          <Image 
-                            source={{ uri: item.avatar_url }} 
-                            className="w-8 h-8 rounded-full"
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <Image 
-                            source={require('../../../assets/images/avatar-placeholder.png')} 
-                            className="w-8 h-8 rounded-full"
-                            resizeMode="cover"
-                          />
-                        )}
-                      </View>
-                      
-                      {/* Message Content */}
-                      <View className="flex-1">
-                        <View className="bg-gray-700 rounded-2xl rounded-bl-md p-3">
-                          <Text className="text-gray-300 text-xs mb-1 font-semibold">
-                            {item.sender_name}
-                          </Text>
-                          {item.media_url ? (
-                            <Image
-                              source={{ uri: item.media_url }}
-                              style={{ width: 200, height: 200, borderRadius: 8 }}
-                            />
-                          ) : (
-                            <Text className="text-white text-base">
-                              {item.content}
-                            </Text>
-                          )}
-                          <Text className="text-gray-400 text-xs mt-1">
-                            {formatTime(item.created_at)}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  ) : (
-                    // Own message (right-aligned, no avatar)
-                    <View className="max-w-[80%] p-3 rounded-2xl bg-blue-500 rounded-br-md">
-                      {item.media_url ? (
-                        <Image
-                          source={{ uri: item.media_url }}
-                          style={{ width: 200, height: 200, borderRadius: 8 }}
-                        />
-                      ) : (
-                        <Text className="text-white text-base">
-                          {item.content}
-                        </Text>
-                      )}
-                      <Text className="text-blue-100 text-xs mt-1">
-                        {formatTime(item.created_at)}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              keyExtractor={(item) => item.id.toString()}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingVertical: 16 }}
-            />
-          )}
-
-          {/* Thread Message Input */}
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={keyboardOffset}
-            className="border-t border-gray-800"
-          >
-            <View className="flex-row items-center p-4 space-x-3">
-              <View className="flex-1">
-                <TextInput
-                  value={threadNewMessage}
-                  onChangeText={setThreadNewMessage}
-                  placeholder="Reply to thread..."
-                  placeholderTextColor="#9CA3AF"
-                  className="bg-gray-800 text-white rounded-full px-4 py-3 max-h-20"
-                  multiline
-                  onSubmitEditing={sendThreadMessage}
-                  blurOnSubmit={false}
-                />
-              </View>
-              
-              <TouchableOpacity 
-                onPress={sendThreadMessage}
-                disabled={!threadNewMessage.trim() || sendingThreadMessage}
-                className={`w-10 h-10 rounded-full items-center justify-center ${
-                  threadNewMessage.trim() && !sendingThreadMessage ? 'bg-blue-500' : 'bg-gray-600'
-                }`}
-              >
-                <Feather 
-                  name="send" 
-                  size={18} 
-                  color="white" 
-                />
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
 
       {/* Join Sprint Camera */}
       {showJoinCamera && (

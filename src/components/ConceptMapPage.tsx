@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  Modal,
   TouchableOpacity,
   SafeAreaView,
   ScrollView,
@@ -14,20 +13,18 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { WebView } from 'react-native-webview';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { useRouter } from 'expo-router';
 
-interface ConceptMapModalProps {
-  visible: boolean;
+interface ConceptMapPageProps {
   sprintId: string;
   sprintTopic: string;
-  onClose: () => void;
 }
 
-export default function ConceptMapModal({ 
-  visible, 
+export default function ConceptMapPage({ 
   sprintId, 
-  sprintTopic, 
-  onClose 
-}: ConceptMapModalProps) {
+  sprintTopic 
+}: ConceptMapPageProps) {
+  const router = useRouter();
   const [conceptMapData, setConceptMapData] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -35,9 +32,9 @@ export default function ConceptMapModal({
   const [isLandscape, setIsLandscape] = useState(false);
 
   useEffect(() => {
-    if (visible && sprintId) {
+    if (sprintId) {
       loadConceptMap();
-      // Allow landscape orientation when modal is open
+      // Allow landscape orientation when page is open
       ScreenOrientation.unlockAsync();
       
       // Listen for orientation changes
@@ -49,12 +46,12 @@ export default function ConceptMapModal({
       });
       
       return () => {
-        // Lock back to portrait when modal closes
+        // Lock back to portrait when page closes
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
         ScreenOrientation.removeOrientationChangeListener(subscription);
       };
     }
-  }, [visible, sprintId]);
+  }, [sprintId]);
 
   const loadConceptMap = async () => {
     setLoading(true);
@@ -203,147 +200,140 @@ export default function ConceptMapModal({
     // Ensure we lock back to portrait when closing
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     setShowTextView(false);
-    onClose();
+    router.back();
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      supportedOrientations={['portrait', 'landscape']}
-    >
-      <SafeAreaView className="flex-1 bg-black">
-        {/* Header */}
-        <View className={`flex-row items-center justify-between p-4 border-b border-gray-800 ${isLandscape ? 'pt-2 pb-2' : ''}`}>
-          <TouchableOpacity onPress={handleClose}>
-            <Text className="text-blue-400 text-lg">Close</Text>
+    <SafeAreaView className="flex-1 bg-black">
+      {/* Header */}
+      <View className={`flex-row items-center justify-between p-4 border-b border-gray-800 ${isLandscape ? 'pt-2 pb-2' : ''}`}>
+        <TouchableOpacity onPress={handleClose}>
+          <Feather name="arrow-left" size={24} color="white" />
+        </TouchableOpacity>
+        <Text className="text-white text-lg font-semibold">Concept Map</Text>
+        {conceptMapData ? (
+          <TouchableOpacity 
+            onPress={() => setShowTextView(!showTextView)}
+            className="flex-row items-center"
+          >
+            <Feather 
+              name={showTextView ? 'map' : 'file-text'} 
+              size={20} 
+              color="#3B82F6" 
+            />
+            {!isLandscape && (
+              <Text className="text-blue-400 text-sm ml-1">
+                {showTextView ? 'Map' : 'Text'}
+              </Text>
+            )}
           </TouchableOpacity>
-          <Text className="text-white text-lg font-semibold">Concept Map</Text>
-          {conceptMapData ? (
-            <TouchableOpacity 
-              onPress={() => setShowTextView(!showTextView)}
-              className="flex-row items-center"
-            >
-              <Feather 
-                name={showTextView ? 'map' : 'file-text'} 
-                size={20} 
-                color="#3B82F6" 
+        ) : (
+          <View style={{ width: 60 }} />
+        )}
+      </View>
+
+      {/* Content */}
+      <View className={`flex-1 ${isLandscape ? 'p-2' : 'p-4'}`}>
+        {!isLandscape && (
+          <>
+            <Text className="text-white text-xl font-semibold mb-2">{sprintTopic}</Text>
+            <Text className="text-gray-400 text-sm mb-4">
+              {showTextView ? 'Structured breakdown of concepts' : 'Visual representation of concepts and their relationships'}
+            </Text>
+          </>
+        )}
+
+        {loading ? (
+          <View className="flex-1 justify-center items-center">
+            <ActivityIndicator size="large" color="#3B82F6" />
+            <Text className="text-gray-400 mt-2">Loading concept map...</Text>
+          </View>
+        ) : conceptMapData ? (
+          showTextView ? (
+            // Text View
+            <ScrollView className="flex-1">
+              <View className="bg-gray-900 rounded-lg p-4 mb-4">
+                <Text className="text-blue-400 text-lg font-semibold mb-3">
+                  📚 Key Concepts
+                </Text>
+                {parseMermaidToText(conceptMapData).concepts.map((concept, index) => (
+                  <View key={index} className="flex-row items-start mb-2">
+                    <Text className="text-blue-400 mr-2">•</Text>
+                    <Text className="text-white flex-1">{concept}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View className="bg-gray-900 rounded-lg p-4 mb-4">
+                <Text className="text-green-400 text-lg font-semibold mb-3">
+                  🔗 Relationships & Connections
+                </Text>
+                {parseMermaidToText(conceptMapData).relationships.map((rel, index) => (
+                  <Text key={index} className="text-gray-300 mb-2 leading-5">
+                    {rel}
+                  </Text>
+                ))}
+              </View>
+
+              <View className="bg-gray-800 rounded-lg p-3 mb-4">
+                <View className="flex-row items-center mb-2">
+                  <Feather name="info" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+                  <Text className="text-gray-400 text-sm font-semibold">How to Use This</Text>
+                </View>
+                <Text className="text-gray-400 text-xs leading-5">
+                  • Review key concepts to reinforce your understanding{'\n'}
+                  • Study the relationships to see how ideas connect{'\n'}
+                  • Rotate your device for a better view of the visual map{'\n'}
+                  • Use this to prepare for quizzes and exams
+                </Text>
+              </View>
+            </ScrollView>
+          ) : (
+            // Map View
+            <View className="flex-1">
+              <WebView
+                originWhitelist={["*"]}
+                source={{ html: generateMermaidHTML(conceptMapData) }}
+                style={{ flex: 1, backgroundColor: 'transparent' }}
+                javaScriptEnabled
+                scrollEnabled={true}
               />
               {!isLandscape && (
-                <Text className="text-blue-400 text-sm ml-1">
-                  {showTextView ? 'Map' : 'Text'}
-                </Text>
+                <View className="bg-gray-800 rounded-lg p-3 mt-2">
+                  <Text className="text-gray-400 text-xs text-center">
+                    💡 Rotate your device for a better view • Generated from your study history
+                  </Text>
+                </View>
               )}
+            </View>
+          )
+        ) : (
+          <View className="flex-1 justify-center items-center px-8">
+            <Feather name="map" size={64} color="gray" />
+            <Text className="text-gray-400 text-lg mt-4 text-center">
+              No concept map available
+            </Text>
+            <Text className="text-gray-500 text-sm mt-2 text-center mb-6">
+              Generate a visual concept map that connects this topic to your previous studies
+            </Text>
+            
+            <TouchableOpacity 
+              onPress={generateConceptMap}
+              disabled={generating}
+              className="bg-blue-600 rounded-lg px-6 py-3 flex-row items-center"
+            >
+              {generating ? (
+                <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+              ) : (
+                <Feather name="map" size={16} color="white" style={{ marginRight: 8 }} />
+              )}
+              <Text className="text-white font-medium">
+                {generating ? 'Generating...' : 'Generate Concept Map'}
+              </Text>
             </TouchableOpacity>
-          ) : (
-            <View style={{ width: 60 }} />
-          )}
-        </View>
-
-        {/* Content */}
-        <View className={`flex-1 ${isLandscape ? 'p-2' : 'p-4'}`}>
-          {!isLandscape && (
-            <>
-              <Text className="text-white text-xl font-semibold mb-2">{sprintTopic}</Text>
-              <Text className="text-gray-400 text-sm mb-4">
-                {showTextView ? 'Structured breakdown of concepts' : 'Visual representation of concepts and their relationships'}
-              </Text>
-            </>
-          )}
-
-          {loading ? (
-            <View className="flex-1 justify-center items-center">
-              <ActivityIndicator size="large" color="#3B82F6" />
-              <Text className="text-gray-400 mt-2">Loading concept map...</Text>
-            </View>
-          ) : conceptMapData ? (
-            showTextView ? (
-              // Text View
-              <ScrollView className="flex-1">
-                <View className="bg-gray-900 rounded-lg p-4 mb-4">
-                  <Text className="text-blue-400 text-lg font-semibold mb-3">
-                    📚 Key Concepts
-                  </Text>
-                  {parseMermaidToText(conceptMapData).concepts.map((concept, index) => (
-                    <View key={index} className="flex-row items-start mb-2">
-                      <Text className="text-blue-400 mr-2">•</Text>
-                      <Text className="text-white flex-1">{concept}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View className="bg-gray-900 rounded-lg p-4 mb-4">
-                  <Text className="text-green-400 text-lg font-semibold mb-3">
-                    🔗 Relationships & Connections
-                  </Text>
-                  {parseMermaidToText(conceptMapData).relationships.map((rel, index) => (
-                    <Text key={index} className="text-gray-300 mb-2 leading-5">
-                      {rel}
-                    </Text>
-                  ))}
-                </View>
-
-                <View className="bg-gray-800 rounded-lg p-3 mb-4">
-                  <View className="flex-row items-center mb-2">
-                    <Feather name="info" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
-                    <Text className="text-gray-400 text-sm font-semibold">How to Use This</Text>
-                  </View>
-                  <Text className="text-gray-400 text-xs leading-5">
-                    • Review key concepts to reinforce your understanding{'\n'}
-                    • Study the relationships to see how ideas connect{'\n'}
-                    • Rotate your device for a better view of the visual map{'\n'}
-                    • Use this to prepare for quizzes and exams
-                  </Text>
-                </View>
-              </ScrollView>
-            ) : (
-              // Map View
-              <View className="flex-1">
-                <WebView
-                  originWhitelist={["*"]}
-                  source={{ html: generateMermaidHTML(conceptMapData) }}
-                  style={{ flex: 1, backgroundColor: 'transparent' }}
-                  javaScriptEnabled
-                  scrollEnabled={true}
-                />
-                {!isLandscape && (
-                  <View className="bg-gray-800 rounded-lg p-3 mt-2">
-                    <Text className="text-gray-400 text-xs text-center">
-                      💡 Rotate your device for a better view • Generated from your study history
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )
-          ) : (
-            <View className="flex-1 justify-center items-center px-8">
-              <Feather name="map" size={64} color="gray" />
-              <Text className="text-gray-400 text-lg mt-4 text-center">
-                No concept map available
-              </Text>
-              <Text className="text-gray-500 text-sm mt-2 text-center mb-6">
-                Generate a visual concept map that connects this topic to your previous studies
-              </Text>
-              
-              <TouchableOpacity 
-                onPress={generateConceptMap}
-                disabled={generating}
-                className="bg-blue-600 rounded-lg px-6 py-3 flex-row items-center"
-              >
-                {generating ? (
-                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-                ) : (
-                  <Feather name="map" size={16} color="white" style={{ marginRight: 8 }} />
-                )}
-                <Text className="text-white font-medium">
-                  {generating ? 'Generating...' : 'Generate Concept Map'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </SafeAreaView>
-    </Modal>
+          </View>
+        )}
+      </View>
+    </SafeAreaView>
   );
 } 

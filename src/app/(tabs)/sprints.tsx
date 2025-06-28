@@ -1,17 +1,13 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Modal, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
+import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
-import QuizModal from '../../components/QuizModal';
-import SprintCompletionModal from '../../components/SprintCompletionModal';
-import QuizResultsModal from '../../components/QuizResultsModal';
-import ConceptMapModal from '../../components/ConceptMapModal';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 
@@ -48,7 +44,6 @@ export default function SprintsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const flatListRef = useRef(null);
-  const [showSprintModal, setShowSprintModal] = useState(false);
   const [selectedCircleId, setSelectedCircleId] = useState<string>('');
   const [sprintTopic, setSprintTopic] = useState('');
   const [sprintGoals, setSprintGoals] = useState('');
@@ -60,24 +55,6 @@ export default function SprintsTab() {
   const [showEndCamera, setShowEndCamera] = useState(false);
   const [startPhotoUrl, setStartPhotoUrl] = useState<string>('');
   const [endingSprintId, setEndingSprintId] = useState<string>('');
-  const [showQuizModal, setShowQuizModal] = useState(false);
-  const [quizSprintId, setQuizSprintId] = useState<string>('');
-  const [quizSprintTopic, setQuizSprintTopic] = useState<string>('');
-  const [quizSprintGoals, setQuizSprintGoals] = useState<string>('');
-  const [quizCircleId, setQuizCircleId] = useState<string>('');
-  const [quizSprintDuration, setQuizSprintDuration] = useState<number>(25);
-  const [selectedQuizQuestionCount, setSelectedQuizQuestionCount] = useState<number>(3);
-  const [showCompletionModal, setShowCompletionModal] = useState(false);
-  const [completionSprintTopic, setCompletionSprintTopic] = useState<string>('');
-  const [completionSprintDuration, setCompletionSprintDuration] = useState<number>(25);
-  const [showQuizResultsModal, setShowQuizResultsModal] = useState(false);
-  const [resultsSprintId, setResultsSprintId] = useState<string>('');
-  const [resultsSprintTopic, setResultsSprintTopic] = useState<string>('');
-
-  const [showConceptMapModal, setShowConceptMapModal] = useState(false);
-  const [conceptMapSprintId, setConceptMapSprintId] = useState<string>('');
-  const [conceptMapSprintTopic, setConceptMapSprintTopic] = useState<string>('');
-
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
 
   const params = useLocalSearchParams<{
@@ -89,7 +66,7 @@ export default function SprintsTab() {
     if (!user) return;
     
     try {
-      // Load recent sprints from user's circles (active + completed in last 24 hours)
+      // Load recent sprints from all circles (the view/RLS will handle access control)
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: sprints, error: sprintsError } = await supabase
         .from('sprints')
@@ -109,13 +86,6 @@ export default function SprintsTab() {
           profiles!inner(username)
         `)
         .or(`ends_at.gt.${new Date().toISOString()},and(ends_at.lt.${new Date().toISOString()},started_at.gt.${oneDayAgo})`)
-        .in('circle_id', 
-          await supabase
-            .from('circle_members')
-            .select('circle_id')
-            .eq('user_id', user.id)
-            .then(({ data }) => data?.map(m => m.circle_id) || [])
-        )
         .order('started_at', { ascending: false });
 
       if (sprintsError) throw sprintsError;
@@ -330,20 +300,18 @@ export default function SprintsTab() {
         if (messageError) console.error('Error sending sprint end notification:', messageError);
       }
 
-      // Show completion modal after sprint ends
+      // Navigate to sprint completion page
       if (sprint) {
-        // Calculate sprint duration
         const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
         
-        setCompletionSprintTopic(topic);
-        setCompletionSprintDuration(duration);
-        setQuizSprintId(sprintId);
-        setQuizSprintTopic(topic);
-        setQuizSprintGoals(sprint.goals || 'General study goals');
-        setQuizCircleId(sprint.circle_id);
-        setQuizSprintDuration(duration);
-        setSelectedQuizQuestionCount(sprint.quiz_question_count || 3);
-        setShowCompletionModal(true);
+        router.push({
+          pathname: '/(pages)/sprint-completion',
+          params: {
+            sprintId,
+            sprintTopic: topic,
+            sprintDuration: duration.toString()
+          }
+        });
       }
       
       loadData(); // Refresh the data
@@ -403,20 +371,18 @@ export default function SprintsTab() {
 
       setEndingSprintId('');
       
-      // Show completion modal after sprint ends
+      // Navigate to sprint completion page
       if (sprint) {
-        // Calculate sprint duration
         const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
         
-        setCompletionSprintTopic(sprint.topic || 'Study Sprint');
-        setCompletionSprintDuration(duration);
-        setQuizSprintId(endingSprintId);
-        setQuizSprintTopic(sprint.topic || 'Study Sprint');
-        setQuizSprintGoals(sprint.goals || 'General study goals');
-        setQuizCircleId(sprint.circle_id);
-        setQuizSprintDuration(duration);
-        setSelectedQuizQuestionCount(sprint.quiz_question_count || 3);
-        setShowCompletionModal(true);
+        router.push({
+          pathname: '/(pages)/sprint-completion',
+          params: {
+            sprintId: endingSprintId,
+            sprintTopic: sprint.topic || 'Study Sprint',
+            sprintDuration: duration.toString()
+          }
+        });
       }
       
       loadData(); // Refresh the data
@@ -549,7 +515,7 @@ export default function SprintsTab() {
         .from('sprint_participants')
         .upsert({ sprint_id: sprint.id, user_id: user.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
 
-      setShowSprintModal(false);
+      setShowStartCamera(false);
       setStartPhotoUrl('');
       const currentTopic = sprintTopic; // Store before clearing
       setSprintTopic(''); // Clear form
@@ -568,20 +534,18 @@ export default function SprintsTab() {
     }
   };
 
-  const openSprintModal = (circleId: string) => {
+  const navigateToCreateSprint = (circleId: string) => {
     setSelectedCircleId(circleId);
-    setSprintTopic('');
-    setSprintGoals('');
-    setSprintDuration(25);
-    setCustomDuration('25'); // Default to 25 minutes (standard Pomodoro)
-    setQuizQuestionCount(3); // Default to 3 questions
-    setShowSprintModal(true);
+    // Navigate to create sprint page
+    router.push(`/(pages)/create-sprint?circleId=${circleId}`);
   };
 
   const openQuizResults = (sprintId: string, sprintTopic: string) => {
-    setResultsSprintId(sprintId);
-    setResultsSprintTopic(sprintTopic);
-    setShowQuizResultsModal(true);
+    // Navigate to quiz results page
+    router.push({
+      pathname: '/(pages)/quiz-results' as any,
+      params: { sprintId, sprintTopic }
+    });
   };
 
   const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
@@ -803,7 +767,6 @@ Return the response in this exact JSON format:
     }
     
     // Show camera to take start photo
-    setShowSprintModal(false);
     setShowStartCamera(true);
   };
 
@@ -878,7 +841,7 @@ Return the response in this exact JSON format:
           const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
           setCustomDuration(duration.toString());
           setQuizQuestionCount(sprint.quiz_question_count || 3);
-          setShowSprintModal(true);
+          setShowStartCamera(true);
         }
         // Clear the parameter to prevent re-triggering
         router.setParams({ copyFrom: undefined });
@@ -934,7 +897,9 @@ Return the response in this exact JSON format:
             <Text className="text-white font-semibold text-lg">{item.topic}</Text>
             <Text className="text-gray-400 text-sm">{item.username} • {item.circle_name}</Text>
             {item.goals && (
-              <Text className="text-gray-300 text-sm mt-1">Goals: {item.goals}</Text>
+              <Text className="text-gray-300 text-sm mt-1">
+                Goals: {Array.isArray(item.goals) ? item.goals.join(', ') : item.goals}
+              </Text>
             )}
           </View>
           
@@ -1013,9 +978,10 @@ Return the response in this exact JSON format:
                 </TouchableOpacity>
                 <TouchableOpacity 
                   onPress={() => {
-                    setConceptMapSprintId(item.id);
-                    setConceptMapSprintTopic(item.topic);
-                    setShowConceptMapModal(true);
+                    router.push({
+                      pathname: '/(pages)/concept-map' as any,
+                      params: { sprintId: item.id, sprintTopic: item.topic }
+                    });
                   }}
                   className="flex-row items-center mr-3"
                 >
@@ -1073,7 +1039,7 @@ Return the response in this exact JSON format:
 
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
-      onPress={() => openSprintModal(item.id)}
+      onPress={() => navigateToCreateSprint(item.id)}
       className="bg-gray-800 rounded-lg p-4 mb-3 mx-4"
     >
       <View className="flex-row justify-between items-center">
@@ -1152,7 +1118,7 @@ Return the response in this exact JSON format:
       }
 
       // Navigate to chat
-      router.push(`/(modals)/chat?circleId=${sprint.circle_id}`);
+              router.push(`/(pages)/chat?circleId=${sprint.circle_id}`);
     } catch (error) {
       console.error('Error joining sprint:', error);
     }
@@ -1250,136 +1216,7 @@ Return the response in this exact JSON format:
         </View>
       </View>
 
-      {/* Sprint Creation Modal */}
-      <Modal
-        visible={showSprintModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <SafeAreaView className="flex-1 bg-black">
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View className="flex-1">
-            {/* Header */}
-            <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
-              <TouchableOpacity onPress={() => {
-                setShowSprintModal(false);
-                setSprintTopic('');
-                setSprintGoals('');
-                setCustomDuration('25');
-                setQuizQuestionCount(3);
-              }}>
-                <Text className="text-blue-400 text-lg">Cancel</Text>
-              </TouchableOpacity>
-              <Text className="text-white text-lg font-semibold">New Sprint</Text>
-              <TouchableOpacity 
-                onPress={createSprint}
-                disabled={!sprintTopic.trim() || !sprintGoals.trim() || creatingSprintLoading || !customDuration || parseInt(customDuration) < 1 || parseInt(customDuration) > 180}
-              >
-                <Text className={`text-lg font-semibold ${
-                  sprintTopic.trim() && sprintGoals.trim() && !creatingSprintLoading && customDuration && parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 ? 'text-blue-400' : 'text-gray-600'
-                }`}>
-                  {creatingSprintLoading ? 'Creating...' : 'Start'}
-                </Text>
-              </TouchableOpacity>
-            </View>
 
-            {/* Form */}
-            <View className="flex-1 p-4">
-              {/* Topic */}
-              <View className="mb-6">
-                <Text className="text-white text-lg font-semibold mb-2">What are you studying?</Text>
-                <TextInput
-                  value={sprintTopic}
-                  onChangeText={setSprintTopic}
-                  placeholder="e.g., React Native components"
-                  placeholderTextColor="#9CA3AF"
-                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
-                  autoFocus
-                />
-              </View>
-
-              {/* Goals */}
-              <View className="mb-6">
-                <Text className="text-white text-lg font-semibold mb-2">Goals</Text>
-                <TextInput
-                  value={sprintGoals}
-                  onChangeText={setSprintGoals}
-                  placeholder="e.g., Complete login screen, Fix navigation bug"
-                  placeholderTextColor="#9CA3AF"
-                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
-                  multiline
-                  numberOfLines={3}
-                  textAlignVertical="top"
-                />
-                <Text className="text-gray-400 text-xs mt-1">
-                  Goals help generate better quiz questions
-                </Text>
-              </View>
-
-              {/* Duration */}
-              <View className="mb-6">
-                <Text className="text-white text-lg font-semibold mb-2">Duration (minutes)</Text>
-                <TextInput
-                  value={customDuration}
-                  onChangeText={(text) => {
-                    setCustomDuration(text);
-                    const num = parseInt(text);
-                    if (!isNaN(num) && num >= 1 && num <= 180) {
-                      setSprintDuration(num);
-                    }
-                  }}
-                  placeholder="Enter duration (1-180 minutes)"
-                  placeholderTextColor="#9CA3AF"
-                  className="bg-gray-800 text-white p-4 rounded-lg text-base"
-                  keyboardType="numeric"
-                />
-                {customDuration && (
-                  <Text className={`text-xs mt-1 ${
-                    parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 
-                      ? 'text-gray-400' 
-                      : 'text-red-400'
-                  }`}>
-                    {parseInt(customDuration) >= 1 && parseInt(customDuration) <= 180 
-                      ? `Duration: ${parseInt(customDuration)} minutes`
-                      : 'Duration must be between 1-180 minutes'
-                    }
-                  </Text>
-                )}
-              </View>
-
-              {/* Quiz Questions */}
-              <View className="mb-6">
-                <Text className="text-white text-lg font-semibold mb-2">Quiz Questions</Text>
-                <Text className="text-gray-400 text-sm mb-3">How many questions should be in your quiz?</Text>
-                
-                <View className="mb-4">
-                  <Slider
-                    style={{ width: '100%', height: 40 }}
-                    minimumValue={3}
-                    maximumValue={10}
-                    step={1}
-                    value={quizQuestionCount}
-                    onValueChange={setQuizQuestionCount}
-                    minimumTrackTintColor="#3B82F6"
-                    maximumTrackTintColor="#4B5563"
-                    thumbTintColor="#3B82F6"
-                  />
-                  
-                  <View className="flex-row justify-between px-1">
-                    <Text className="text-gray-500 text-xs">3</Text>
-                    <Text className="text-gray-500 text-xs">10</Text>
-                  </View>
-                </View>
-                
-                <Text className="text-gray-400 text-center text-sm">
-                  {quizQuestionCount} question{quizQuestionCount !== 1 ? 's' : ''}
-                </Text>
-              </View>
-            </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </SafeAreaView>
-      </Modal>
 
       {/* Sprint Start Camera */}
       {showStartCamera && (
@@ -1388,7 +1225,6 @@ Return the response in this exact JSON format:
             onCapture={handleStartPhoto}
             onCancel={() => {
               setShowStartCamera(false);
-              setShowSprintModal(true); // Go back to sprint modal
             }}
           />
         </View>
@@ -1407,44 +1243,7 @@ Return the response in this exact JSON format:
         </View>
       )}
 
-      {/* Sprint Completion Modal */}
-      <SprintCompletionModal
-        visible={showCompletionModal}
-        sprintTopic={completionSprintTopic}
-        sprintDuration={completionSprintDuration}
-        onTakeQuiz={() => {
-          setShowCompletionModal(false);
-          setShowQuizModal(true);
-        }}
-      />
 
-      {/* Quiz Modal */}
-      <QuizModal
-        visible={showQuizModal}
-        onClose={() => setShowQuizModal(false)}
-        sprintId={quizSprintId}
-        sprintTopic={quizSprintTopic}
-        sprintGoals={quizSprintGoals}
-        circleId={quizCircleId}
-        sprintDuration={quizSprintDuration}
-        questionCount={selectedQuizQuestionCount}
-      />
-
-      {/* Quiz Results Modal */}
-      <QuizResultsModal
-        visible={showQuizResultsModal}
-        onClose={() => setShowQuizResultsModal(false)}
-        sprintId={resultsSprintId}
-        sprintTopic={resultsSprintTopic}
-      />
-
-      {/* Concept Map Modal */}
-      <ConceptMapModal
-        visible={showConceptMapModal}
-        onClose={() => setShowConceptMapModal(false)}
-        sprintId={conceptMapSprintId}
-        sprintTopic={conceptMapSprintTopic}
-      />
     </SafeAreaView>
     </GestureHandlerRootView>
   );
