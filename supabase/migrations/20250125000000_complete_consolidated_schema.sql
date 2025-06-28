@@ -35,7 +35,8 @@ DROP TABLE IF EXISTS sprints CASCADE;
 DROP TABLE IF EXISTS streaks CASCADE;
 DROP TABLE IF EXISTS message_reads CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
-DROP TABLE IF EXISTS circle_invites CASCADE;
+DROP TABLE IF EXISTS circle_invitations CASCADE;  -- New direct invitations table
+DROP TABLE IF EXISTS circle_invites CASCADE;       -- Old invite code table
 DROP TABLE IF EXISTS circle_members CASCADE;
 DROP TABLE IF EXISTS circles CASCADE;
 DROP TABLE IF EXISTS notifications CASCADE;
@@ -57,6 +58,13 @@ DROP FUNCTION IF EXISTS get_user_circles() CASCADE;
 DROP FUNCTION IF EXISTS create_circle_invite(uuid, timestamptz, integer) CASCADE;
 DROP FUNCTION IF EXISTS check_vault_secrets() CASCADE;
 DROP FUNCTION IF EXISTS notify_circle_message_push() CASCADE;
+DROP FUNCTION IF EXISTS send_circle_invitation(uuid, uuid) CASCADE;
+DROP FUNCTION IF EXISTS respond_to_circle_invitation(uuid, text) CASCADE;
+DROP FUNCTION IF EXISTS get_pending_circle_invitations() CASCADE;
+DROP FUNCTION IF EXISTS get_invitable_friends(uuid) CASCADE;
+DROP FUNCTION IF EXISTS join_circle_by_invite(text) CASCADE;
+DROP FUNCTION IF EXISTS get_circle_invites(uuid) CASCADE;
+DROP FUNCTION IF EXISTS revoke_circle_invite(uuid) CASCADE;
 
 ------------------------------------------------------------
 -- 3. Core user profiles table
@@ -121,16 +129,15 @@ CREATE TABLE circle_members (
   PRIMARY KEY (circle_id, user_id)
 );
 
-CREATE TABLE circle_invites (
+CREATE TABLE circle_invitations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   circle_id uuid NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
-  created_by uuid NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
-  invite_code text NOT NULL UNIQUE,
-  expires_at timestamptz,
-  max_uses integer,
-  uses_count integer DEFAULT 0,
-  is_active boolean DEFAULT true,
-  created_at timestamptz DEFAULT now()
+  from_user_id uuid NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+  to_user_id uuid NOT NULL REFERENCES profiles(user_id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  responded_at timestamptz,
+  UNIQUE(circle_id, to_user_id) -- Can only have one invite per user per circle
 );
 
 ------------------------------------------------------------
@@ -283,6 +290,12 @@ CREATE INDEX idx_sprint_participants_user ON sprint_participants(user_id);
 
 -- Circle indexes
 CREATE INDEX idx_circle_members_user ON circle_members(user_id);
+
+-- Circle invitations indexes
+CREATE INDEX idx_circle_invitations_to_user ON circle_invitations(to_user_id);
+CREATE INDEX idx_circle_invitations_from_user ON circle_invitations(from_user_id);
+CREATE INDEX idx_circle_invitations_circle ON circle_invitations(circle_id);
+CREATE INDEX idx_circle_invitations_status ON circle_invitations(status);
 
 -- Quiz indexes
 CREATE INDEX idx_quiz_attempts_quiz ON quiz_attempts(quiz_id);
@@ -589,45 +602,228 @@ BEGIN
 END;
 $$;
 
--- Function to create circle invite
-CREATE OR REPLACE FUNCTION create_circle_invite(
-    p_circle_id uuid,
-    p_expires_at timestamptz DEFAULT NULL,
-    p_max_uses integer DEFAULT NULL
+-- Function to send circle invitation
+CREATE OR REPLACE FUNCTION send_circle_invitation(
+  p_circle_id uuid,
+  p_to_user_id uuid
 )
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
-    v_invite_code text;
-    v_invite_id uuid;
+  v_circle_name text;
+  v_from_user_id uuid;
+  v_invitation_id uuid;
+  v_is_public boolean;
 BEGIN
-    -- Check if user is owner or has permission
-    IF NOT EXISTS (
-        SELECT 1 FROM circle_members cm
-        JOIN circles c ON c.id = cm.circle_id
-        WHERE cm.circle_id = p_circle_id 
-        AND cm.user_id = auth.uid()
-        AND (c.owner = auth.uid() OR c.allow_member_invites = true)
-    ) THEN
-        RAISE EXCEPTION 'Unauthorized to create invites for this circle';
-    END IF;
+  v_from_user_id := auth.uid();
+  
+  -- Check if sender is a member of the circle
+  IF NOT EXISTS (
+    SELECT 1 FROM circle_members cm
+    WHERE cm.circle_id = p_circle_id AND cm.user_id = v_from_user_id
+  ) THEN
+    RETURN jsonb_build_object('error', 'You are not a member of this circle');
+  END IF;
 
-    -- Generate unique invite code
-    v_invite_code := encode(gen_random_bytes(6), 'hex');
-    
-    -- Create invite
-    INSERT INTO circle_invites (circle_id, created_by, invite_code, expires_at, max_uses)
-    VALUES (p_circle_id, auth.uid(), v_invite_code, p_expires_at, p_max_uses)
-    RETURNING id INTO v_invite_id;
+  -- Get circle details
+  SELECT name, (visibility = 'public') INTO v_circle_name, v_is_public
+  FROM circles WHERE id = p_circle_id;
 
+  -- Check if circle is public
+  IF v_is_public THEN
+    RETURN jsonb_build_object('error', 'Public circles do not require invitations');
+  END IF;
+
+  -- Check if the recipient is already a member
+  IF EXISTS (
+    SELECT 1 FROM circle_members
+    WHERE circle_id = p_circle_id AND user_id = p_to_user_id
+  ) THEN
+    RETURN jsonb_build_object('error', 'User is already a member of this circle');
+  END IF;
+
+  -- Check if users are friends
+  IF NOT EXISTS (
+    SELECT 1 FROM friends
+    WHERE (user_id = v_from_user_id AND friend_id = p_to_user_id)
+       OR (user_id = p_to_user_id AND friend_id = v_from_user_id)
+  ) THEN
+    RETURN jsonb_build_object('error', 'You can only invite friends to private circles');
+  END IF;
+
+  -- Check if there's already a pending invitation
+  IF EXISTS (
+    SELECT 1 FROM circle_invitations
+    WHERE circle_id = p_circle_id 
+      AND to_user_id = p_to_user_id 
+      AND status = 'pending'
+  ) THEN
+    RETURN jsonb_build_object('error', 'Invitation already sent to this user');
+  END IF;
+
+  -- Delete any old declined/accepted invitations to allow re-inviting
+  DELETE FROM circle_invitations
+  WHERE circle_id = p_circle_id 
+    AND to_user_id = p_to_user_id 
+    AND status IN ('accepted', 'declined');
+
+  -- Create the invitation
+  INSERT INTO circle_invitations (circle_id, from_user_id, to_user_id)
+  VALUES (p_circle_id, v_from_user_id, p_to_user_id)
+  RETURNING id INTO v_invitation_id;
+
+  -- Create notification for the recipient
+  INSERT INTO notifications (user_id, type, payload)
+  VALUES (
+    p_to_user_id,
+    'circle_invitation',
+    jsonb_build_object(
+      'invitation_id', v_invitation_id,
+      'circle_id', p_circle_id,
+      'circle_name', v_circle_name,
+      'from_user_id', v_from_user_id
+    )
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'invitation_id', v_invitation_id,
+    'circle_name', v_circle_name
+  );
+END;
+$$;
+
+-- Function to respond to circle invitation
+CREATE OR REPLACE FUNCTION respond_to_circle_invitation(
+  p_invitation_id uuid,
+  p_response text -- 'accepted' or 'declined'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_invitation record;
+  v_user_id uuid;
+  v_circle_name text;
+BEGIN
+  v_user_id := auth.uid();
+  
+  -- Get invitation details
+  SELECT * INTO v_invitation
+  FROM circle_invitations
+  WHERE id = p_invitation_id
+    AND to_user_id = v_user_id
+    AND status = 'pending';
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('error', 'Invalid or already processed invitation');
+  END IF;
+
+  -- If accepted, add user to circle
+  IF p_response = 'accepted' THEN
+    INSERT INTO circle_members (circle_id, user_id, role)
+    VALUES (v_invitation.circle_id, v_user_id, 'member')
+    ON CONFLICT DO NOTHING;
+  END IF;
+
+  -- Get circle name for return message
+  SELECT name INTO v_circle_name FROM circles WHERE id = v_invitation.circle_id;
+
+  -- Delete the invitation to allow future re-invites
+  DELETE FROM circle_invitations WHERE id = p_invitation_id;
+
+  -- Return appropriate response
+  IF p_response = 'accepted' THEN
     RETURN jsonb_build_object(
-        'invite_id', v_invite_id,
-        'invite_code', v_invite_code,
-        'expires_at', p_expires_at,
-        'max_uses', p_max_uses
+      'success', true,
+      'message', 'Successfully joined the circle',
+      'circle_id', v_invitation.circle_id,
+      'circle_name', v_circle_name
     );
+  ELSE
+    RETURN jsonb_build_object(
+      'success', true,
+      'message', 'Invitation declined'
+    );
+  END IF;
+END;
+$$;
+
+-- Function to get pending circle invitations for a user
+CREATE OR REPLACE FUNCTION get_pending_circle_invitations()
+RETURNS TABLE (
+  id uuid,
+  circle_id uuid,
+  circle_name text,
+  from_user_id uuid,
+  from_username text,
+  from_avatar_url text,
+  created_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    ci.id,
+    ci.circle_id,
+    c.name as circle_name,
+    ci.from_user_id,
+    p.username as from_username,
+    p.avatar_url as from_avatar_url,
+    ci.created_at
+  FROM circle_invitations ci
+  JOIN circles c ON c.id = ci.circle_id
+  JOIN profiles p ON p.user_id = ci.from_user_id
+  WHERE ci.to_user_id = auth.uid()
+    AND ci.status = 'pending'
+  ORDER BY ci.created_at DESC;
+END;
+$$;
+
+-- Function to get friends available to invite to a circle
+CREATE OR REPLACE FUNCTION get_invitable_friends(p_circle_id uuid)
+RETURNS TABLE (
+  user_id uuid,
+  username text,
+  avatar_url text,
+  has_pending_invite boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Check if user is a member of the circle
+  IF NOT EXISTS (
+    SELECT 1 FROM circle_members cm
+    WHERE cm.circle_id = p_circle_id AND cm.user_id = auth.uid()
+  ) THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT 
+    p.user_id,
+    p.username,
+    p.avatar_url,
+    EXISTS(
+      SELECT 1 FROM circle_invitations ci
+      WHERE ci.circle_id = p_circle_id 
+        AND ci.to_user_id = p.user_id 
+        AND ci.status = 'pending'
+    ) as has_pending_invite
+  FROM friends f
+  JOIN profiles p ON p.user_id = f.friend_id
+  WHERE f.user_id = auth.uid()
+    AND NOT EXISTS (
+      SELECT 1 FROM circle_members cm
+      WHERE cm.circle_id = p_circle_id AND cm.user_id = f.friend_id
+    )
+  ORDER BY p.username;
 END;
 $$;
 
@@ -675,132 +871,6 @@ BEGIN
     GROUP BY c.id;
 
     RETURN v_circle_data;
-END;
-$$;
-
--- Function to get circle invites
-CREATE OR REPLACE FUNCTION get_circle_invites(p_circle_id uuid)
-RETURNS TABLE (
-    id uuid,
-    invite_code text,
-    created_by_username text,
-    expires_at timestamptz,
-    max_uses integer,
-    uses_count integer,
-    created_at timestamptz
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-    -- Check if user is owner or has permission
-    IF NOT EXISTS (
-        SELECT 1 FROM circle_members cm
-        JOIN circles c ON c.id = cm.circle_id
-        WHERE cm.circle_id = p_circle_id 
-        AND cm.user_id = auth.uid()
-        AND (c.owner = auth.uid() OR cm.role = 'admin')
-    ) THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    SELECT 
-        ci.id,
-        ci.invite_code,
-        p.username as created_by_username,
-        ci.expires_at,
-        ci.max_uses,
-        ci.uses_count,
-        ci.created_at
-    FROM circle_invites ci
-    JOIN profiles p ON p.user_id = ci.created_by
-    WHERE ci.circle_id = p_circle_id
-      AND ci.is_active = true
-    ORDER BY ci.created_at DESC;
-END;
-$$;
-
--- Function to revoke circle invite
-CREATE OR REPLACE FUNCTION revoke_circle_invite(p_invite_id uuid)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_circle_id uuid;
-BEGIN
-    -- Get circle_id from invite
-    SELECT circle_id INTO v_circle_id
-    FROM circle_invites
-    WHERE id = p_invite_id;
-
-    -- Check if user has permission
-    IF NOT EXISTS (
-        SELECT 1 FROM circle_members cm
-        JOIN circles c ON c.id = cm.circle_id
-        WHERE cm.circle_id = v_circle_id 
-        AND cm.user_id = auth.uid()
-        AND (c.owner = auth.uid() OR cm.role = 'admin')
-    ) THEN
-        RETURN jsonb_build_object('error', 'Unauthorized');
-    END IF;
-
-    -- Revoke invite
-    UPDATE circle_invites
-    SET is_active = false
-    WHERE id = p_invite_id;
-
-    RETURN jsonb_build_object('success', true);
-END;
-$$;
-
--- Function to join circle by invite
-CREATE OR REPLACE FUNCTION join_circle_by_invite(p_invite_code text)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_invite record;
-    v_user_id uuid;
-BEGIN
-    v_user_id := auth.uid();
-    
-    -- Find valid invite
-    SELECT * INTO v_invite
-    FROM circle_invites
-    WHERE invite_code = p_invite_code
-      AND is_active = true
-      AND (expires_at IS NULL OR expires_at > now())
-      AND (max_uses IS NULL OR uses_count < max_uses);
-
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('error', 'Invalid or expired invite code');
-    END IF;
-
-    -- Check if already a member
-    IF EXISTS (
-        SELECT 1 FROM circle_members
-        WHERE circle_id = v_invite.circle_id AND user_id = v_user_id
-    ) THEN
-        RETURN jsonb_build_object('error', 'Already a member of this circle');
-    END IF;
-
-    -- Add user to circle
-    INSERT INTO circle_members (circle_id, user_id, role)
-    VALUES (v_invite.circle_id, v_user_id, 'member')
-    ON CONFLICT DO NOTHING;
-
-    -- Increment uses count
-    UPDATE circle_invites
-    SET uses_count = uses_count + 1
-    WHERE id = v_invite.id;
-
-    RETURN jsonb_build_object(
-        'success', true,
-        'circle_id', v_invite.circle_id
-    );
 END;
 $$;
 
@@ -912,13 +982,13 @@ GRANT EXECUTE ON FUNCTION mark_natural_sprint_completions() TO service_role;
 GRANT EXECUTE ON FUNCTION get_users_needing_reminder(text) TO service_role;
 GRANT EXECUTE ON FUNCTION get_circle_messages(uuid) TO authenticated, anon;
 GRANT EXECUTE ON FUNCTION get_user_circles() TO authenticated, anon;
-GRANT EXECUTE ON FUNCTION create_circle_invite(uuid, timestamptz, integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION upsert_sprint_message(uuid, uuid, uuid, text, text) TO authenticated, anon;
 GRANT EXECUTE ON FUNCTION get_circle_details(uuid) TO authenticated, anon;
-GRANT EXECUTE ON FUNCTION get_circle_invites(uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION revoke_circle_invite(uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION join_circle_by_invite(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION check_vault_secrets() TO authenticated;
+GRANT EXECUTE ON FUNCTION send_circle_invitation(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION respond_to_circle_invitation(uuid, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_pending_circle_invitations() TO authenticated;
+GRANT EXECUTE ON FUNCTION get_invitable_friends(uuid) TO authenticated;
 
 ------------------------------------------------------------
 -- 15. Vault Setup (for secure storage of project secrets)
@@ -1000,7 +1070,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE friends;
 ALTER PUBLICATION supabase_realtime ADD TABLE friend_requests;
 ALTER PUBLICATION supabase_realtime ADD TABLE circles;
 ALTER PUBLICATION supabase_realtime ADD TABLE circle_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE circle_invites;
+ALTER PUBLICATION supabase_realtime ADD TABLE circle_invitations;
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE message_reads;
 ALTER PUBLICATION supabase_realtime ADD TABLE message_reactions;
@@ -1016,5 +1086,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 -- 18. Row Level Security (RLS)
 ------------------------------------------------------------
 -- RLS is disabled per PRD requirements for simplicity
+
+-- Clean up any existing accepted/declined invitations  
+-- (This allows re-inviting users who previously left circles)
+DELETE FROM circle_invitations WHERE status IN ('accepted', 'declined');
 
 COMMIT; 
