@@ -3,6 +3,7 @@ import { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import * as Localization from 'expo-localization'
 import * as Notifications from 'expo-notifications'
+import Constants from 'expo-constants'
 
 // WebBrowser.maybeCompleteAuthSession()
 
@@ -310,7 +311,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const req = await Notifications.requestPermissionsAsync()
           if (req.status !== 'granted') return
         }
-        const token = (await Notifications.getExpoPushTokenAsync()).data
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId || 
+                        Constants.easConfig?.projectId
+        
+        if (!projectId) {
+          console.warn('No projectId found in app configuration')
+          return
+        }
+        
+        const token = (await Notifications.getExpoPushTokenAsync({
+          projectId
+        })).data
         if (!token) return
         await supabase
           .from('profiles')
