@@ -125,7 +125,7 @@ export default function SprintCameraPage() {
     }
   };
 
-  const createNewSprint = async (photoUrl: string) => {
+  const createSprintInBackground = async (photoUrl: string) => {
     if (!params.circleId || !params.topic || !params.duration || !user) return;
 
     try {
@@ -194,16 +194,14 @@ export default function SprintCameraPage() {
       // Generate quiz in the background (don't await)
       generateQuizForSprint(sprint.id, params.topic, params.goals || '', parseInt(params.questionCount || '3'));
 
-      // Navigate to sprints tab
-      router.replace('/(tabs)/sprints');
-      Alert.alert('Sprint Started!', `Your ${params.topic} sprint has begun. Good luck!`);
     } catch (error) {
       console.error('Error creating sprint:', error);
-      Alert.alert('Error', 'Failed to create sprint. Please try again.');
+      // Show error notification but don't block the user
+      Alert.alert('Sprint Creation Failed', 'Your sprint could not be created. Please try again.');
     }
   };
 
-  const updateExistingSprint = async (photoUrl: string) => {
+  const updateExistingSprintInBackground = async (photoUrl: string) => {
     if (!params.sprintId) return;
 
     try {
@@ -234,20 +232,26 @@ export default function SprintCameraPage() {
             .eq('id', rootMessage.id);
         }
       }
-
-      // Navigate back to sprints tab
-      router.replace('/(tabs)/sprints');
     } catch (error) {
-      console.error('Error handling sprint photo:', error);
-      Alert.alert('Error', 'Failed to save sprint photo. Please try again.');
+      console.error('Error updating sprint photo:', error);
+      Alert.alert('Photo Update Failed', 'Could not save your sprint photo.');
     }
   };
 
   const handleCapture = async (photoUrl: string) => {
+    // Navigate immediately for better UX
     if (params.isNewSprint === 'true') {
-      await createNewSprint(photoUrl);
+      // Navigate to sprints tab
+      router.replace('/(tabs)/sprints');
+      
+      // Create sprint in background (don't await)
+      createSprintInBackground(photoUrl);
     } else {
-      await updateExistingSprint(photoUrl);
+      // Navigate back immediately
+      router.replace('/(tabs)/sprints');
+      
+      // Update in background (don't await)
+      updateExistingSprintInBackground(photoUrl);
     }
   };
 

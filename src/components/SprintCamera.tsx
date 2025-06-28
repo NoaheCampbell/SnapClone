@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Alert, TextInput, Image, ScrollView, Modal } from 'react-native'
+import { View, Text, TouchableOpacity, Alert, TextInput, Image, ScrollView, Modal, ActivityIndicator } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -203,8 +203,8 @@ const EditableTextInput = React.memo(({ textOverlay, onFinishEditing, currentEdi
 
 export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [cameraType, setCameraType] = useState<CameraType>('back');
-  const [flashMode, setFlashMode] = useState<FlashMode>('off');
+  const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
+  const [flashMode, setFlashMode] = useState<'on' | 'off'>('off');
   const [isCapturing, setIsCapturing] = useState(false);
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
@@ -214,6 +214,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   const [postOptionsVisible, setPostOptionsVisible] = useState(false);
   const [pendingCapture, setPendingCapture] = useState(false);
   const [photoLoaded, setPhotoLoaded] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const cameraRef = useRef<CameraView>(null);
   const containerRef = useRef<View>(null);
@@ -417,10 +418,10 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   };
 
   const usePhoto = () => {
-    if (capturedPhoto) {
+    if (capturedPhoto && !isProcessing) {
+      setIsProcessing(true);
       onCapture(capturedPhoto);
     }
-    resetCamera();
   };
 
   const renderFilteredCamera = () => {
@@ -828,20 +829,62 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
           >
             <TouchableOpacity
               onPress={usePhoto}
+              disabled={isProcessing}
               style={{
-                backgroundColor: '#32c862',
+                backgroundColor: isProcessing ? '#1a7a3a' : '#32c862',
                 paddingVertical: 12,
                 paddingHorizontal: 24,
                 borderRadius: 24,
+                opacity: isProcessing ? 0.7 : 1,
               }}
             >
-              <Text style={{ color: 'white', fontWeight: 'bold' }}>Use Photo</Text>
+              <Text style={{ color: 'white', fontWeight: 'bold' }}>
+                {isProcessing ? 'Creating Sprint...' : 'Use Photo'}
+              </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={resetCamera} style={{ paddingVertical: 12, paddingHorizontal: 16 }}>
+            <TouchableOpacity 
+              onPress={resetCamera} 
+              disabled={isProcessing}
+              style={{ 
+                paddingVertical: 12, 
+                paddingHorizontal: 16,
+                opacity: isProcessing ? 0.5 : 1,
+              }}
+            >
               <Text style={{ color: 'white' }}>Retake</Text>
             </TouchableOpacity>
           </SafeAreaView>
+
+          {/* Loading Overlay */}
+          {isProcessing && (
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <View
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  borderRadius: 20,
+                  padding: 24,
+                  alignItems: 'center',
+                }}
+              >
+                <ActivityIndicator size="large" color="white" />
+                <Text style={{ color: 'white', marginTop: 16, fontSize: 16 }}>
+                  Starting your sprint...
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       </Modal>
     </>
