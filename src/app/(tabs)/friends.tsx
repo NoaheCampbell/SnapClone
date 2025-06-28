@@ -512,7 +512,7 @@ export default function FriendsScreen() {
         </View>
       </View>
       
-      <View className="flex-row space-x-3">
+      <View className="flex-row gap-3">
         <TouchableOpacity
           onPress={() => respondToFriendRequest(item.id, 'accepted')}
           className="flex-1 bg-green-500 rounded-xl py-3 items-center"
@@ -587,7 +587,7 @@ export default function FriendsScreen() {
         </View>
       </View>
       
-      <View className="flex-row space-x-3">
+      <View className="flex-row gap-3">
         <TouchableOpacity
           onPress={() => respondToCircleInvitation(item.id, 'accepted')}
           className="flex-1 bg-green-500 rounded-xl py-3 items-center"
@@ -619,7 +619,7 @@ export default function FriendsScreen() {
             }
           </Text>
         </View>
-        <View className="flex-row space-x-3">
+        <View className="flex-row gap-4">
           {activeTab === 'friends' && (friendRequests.length > 0 || circleInvitations.length > 0) && (
             <View className="relative">
               <View className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full items-center justify-center z-10">

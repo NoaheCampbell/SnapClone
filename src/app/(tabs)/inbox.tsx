@@ -434,7 +434,7 @@ export default function InboxScreen() {
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
           <Text className="text-white text-xl font-bold">Circles</Text>
-          <View className="flex-row items-center space-x-3">
+          <View className="flex-row items-center gap-4">
             <TouchableOpacity onPress={() => router.push('/(pages)/discover-circles')}>
               <Feather name="search" size={24} color="white" />
             </TouchableOpacity>
@@ -469,7 +469,7 @@ export default function InboxScreen() {
             <Text className="text-gray-500 text-sm mt-2 text-center">
               Start a conversation with your friends or discover public circles
             </Text>
-            <View className="flex-row space-x-3 mt-6">
+            <View className="flex-row gap-4 mt-6">
               <TouchableOpacity 
                 onPress={() => router.push('/(pages)/new-chat')}
                 className="bg-blue-500 px-6 py-3 rounded-full"

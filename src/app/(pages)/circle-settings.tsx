@@ -510,7 +510,7 @@ export default function CircleSettingsScreen() {
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-lg font-bold mb-3">Circle Name</Text>
           {editingName ? (
-            <View className="flex-row items-center space-x-2">
+            <View className="flex-row items-center gap-3">
               <TextInput
                 value={newName}
                 onChangeText={setNewName}
