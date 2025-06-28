@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>SnapClone</string>
+    <string>SprintLoop</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -26,16 +26,16 @@
     <array>
       <dict>
         <key>CFBundleURLSchemes</key>
-        <array>
-          <string>snapclone</string>
-          <string>com.anonymous.SnapClone</string>
-        </array>
+                  <array>
+            <string>snapclone</string>
+            <string>com.anonymous.SprintLoop</string>
+          </array>
       </dict>
       <dict>
         <key>CFBundleURLSchemes</key>
-        <array>
-          <string>exp+snapclone</string>
-        </array>
+                  <array>
+            <string>exp+snapclone</string>
+          </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>

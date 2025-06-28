@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "SnapClone",
+    "name": "SprintLoop",
     "slug": "SnapClone",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -18,7 +18,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
       },
-      "bundleIdentifier": "com.anonymous.SnapClone"
+      "bundleIdentifier": "com.anonymous.SprintLoop"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +29,7 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
-      "package": "com.anonymous.SnapClone"
+      "package": "com.anonymous.SprintLoop"
     },
     "web": {
       "bundler": "metro",

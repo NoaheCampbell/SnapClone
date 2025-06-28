@@ -347,16 +347,20 @@ const MemoizedMessage = memo(({
   );
 }, (prevProps, nextProps) => {
   // Custom comparison function - only re-render if specific props change
-  return (
+  const shouldSkipRender = (
     prevProps.item.id === nextProps.item.id &&
     prevProps.joinedSprints === nextProps.joinedSprints &&
     prevProps.receipts[prevProps.item.id] === nextProps.receipts[nextProps.item.id] &&
-    JSON.stringify(prevProps.reactions) === JSON.stringify(nextProps.reactions)
+    JSON.stringify(prevProps.reactions) === JSON.stringify(nextProps.reactions) &&
+    prevProps.threadCounts[prevProps.item.id] === nextProps.threadCounts[nextProps.item.id] &&
+    prevProps.item.join_count === nextProps.item.join_count
   );
+  
+  return shouldSkipRender;
 });
 
 // Separate ThreadCounter component that updates independently
-const ThreadCounter = memo(({ messageId, initialCount, threadCounts }: {
+const ThreadCounter = ({ messageId, initialCount, threadCounts }: {
   messageId: number;
   initialCount: number;
   threadCounts: Record<number, number>;
@@ -366,11 +370,11 @@ const ThreadCounter = memo(({ messageId, initialCount, threadCounts }: {
   if (count <= 1) return null;
   
   return (
-    <View className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
+    <View key={`thread-${messageId}-${count}`} className="bg-blue-500/90 px-2 py-0.5 rounded-full mr-2">
       <Text className="text-white text-xs">{count}</Text>
     </View>
   );
-});
+};
 
 // Thread opener component
 const ThreadOpener = memo(({ 
@@ -551,6 +555,35 @@ export default function ChatScreen() {
       loadMessages()
       loadChatInfo()
       
+      // Subscribe to thread messages to update counts in realtime
+      const threadSubscription = supabase
+        .channel(`circle-threads:${channelId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages'
+          },
+          async (payload) => {
+            const newMessage = payload.new as any;
+            
+            // Check if this is a thread message (not root) in our circle
+            if (newMessage.circle_id !== channelId || !newMessage.thread_root_id || newMessage.thread_root_id === newMessage.id) {
+              return;
+            }
+            
+            // Don't increment here - wait for the UPDATE event which has the authoritative count
+            // This prevents double counting
+            
+            // Update participant avatars if needed
+            if (newMessage.sprint_id) {
+              fetchParticipantAvatars(newMessage.sprint_id);
+            }
+          }
+        )
+        .subscribe();
+      
       // Set up a periodic check for thread updates (to catch any missed real-time updates)
       const threadUpdateInterval = setInterval(async () => {
         // Get current messages from ref to avoid closure issues
@@ -644,6 +677,11 @@ export default function ChatScreen() {
                 }
               ]
             })
+            
+            // If this is a sprint message, add it to threadCounts
+            if (newMessage.sprint_id) {
+              setThreadCounts(prev => ({ ...prev, [newMessage.id]: newMessage.join_count || 1 }));
+            }
           }
         )
         .on(
@@ -725,21 +763,37 @@ export default function ChatScreen() {
           {
             event: 'UPDATE',
             schema: 'public',
-            table: 'messages',
-            filter: `circle_id=eq.${channelId}`
+            table: 'messages'
           },
           async (payload) => {
             const updated = payload.new as any;
             const old = payload.old as any;
             
+            // Check if this update is for a message in our circle
+            if (updated.circle_id !== channelId) return;
+            
             // Update thread counts separately to avoid re-rendering all messages
-            if (updated.join_count !== old.join_count) {
-              setThreadCounts(prev => ({ ...prev, [updated.id]: updated.join_count }));
+            // Check if join_count actually changed (handle undefined old value)
+            const oldCount = old?.join_count || 0;
+            const newCount = updated.join_count || 0;
+            
+            // For sprint messages, always update the count even if going from undefined/1 to 2
+            if (updated.sprint_id && newCount !== oldCount) {
+              setThreadCounts(prev => ({ ...prev, [updated.id]: newCount }));
+              
+              // Also update the message in the messages array to force re-render
+              setMessages(prev => prev.map(msg => 
+                msg.id === updated.id ? { ...msg, join_count: newCount } : msg
+              ));
               
               // Fetch updated participant avatars if needed
-              if (updated.sprint_id && updated.join_count > (old.join_count || 1)) {
+              if (newCount > oldCount) {
                 fetchParticipantAvatars(updated.sprint_id);
               }
+            }
+            // For non-sprint messages, only track if count > 1
+            else if (!updated.sprint_id && newCount > 1 && newCount !== oldCount) {
+              setThreadCounts(prev => ({ ...prev, [updated.id]: newCount }));
             }
             
             // Track joined sprints
@@ -762,7 +816,8 @@ export default function ChatScreen() {
 
       return () => {
         clearInterval(threadUpdateInterval);
-        supabase.removeChannel(subscription)
+        supabase.removeChannel(subscription);
+        supabase.removeChannel(threadSubscription);
       }
     }
   }, [channelId])
@@ -877,10 +932,15 @@ export default function ChatScreen() {
       
       setMessages(processedMessages)
       
-      // Initialize thread counts
+      // Initialize thread counts - track all sprint messages even if join_count is 1
       const counts: Record<number, number> = {};
       processedMessages.forEach(msg => {
-        if (msg.join_count && msg.join_count > 0) {
+        // Track all sprint messages (they can have threads)
+        if (msg.sprint_id) {
+          counts[msg.id] = msg.join_count || 1;
+        }
+        // Also track non-sprint messages that already have threads
+        else if (msg.join_count && msg.join_count > 1) {
           counts[msg.id] = msg.join_count;
         }
       });
@@ -1431,14 +1491,17 @@ export default function ChatScreen() {
           });
 
         if (!messageError) {
-          // Update join count on root message
-          await supabase
+          // Update join count on root message - force updated_at to trigger realtime
+          const newJoinCount = (existingMessages.join_count || 1) + 1;
+          const { error: updateError } = await supabase
             .from('messages')
             .update({ 
-              join_count: (existingMessages.join_count || 1) + 1,
+              join_count: newJoinCount,
               updated_at: new Date().toISOString()
             })
             .eq('id', existingMessages.id);
+            
+
         }
       } else {
         // No root message, create one
@@ -1466,7 +1529,8 @@ export default function ChatScreen() {
 
       // Optimistically bump counter without re-rendering all messages
       if (existingMessages) {
-        setThreadCounts(prev => ({ ...prev, [existingMessages.id]: (existingMessages.join_count || 1) + 1 }));
+        const updatedCount = (existingMessages.join_count || 1) + 1;
+        setThreadCounts(prev => ({ ...prev, [existingMessages.id]: updatedCount }));
       }
       setJoinedSprints(prev => [...prev, joinSprintData.sprintId]);
 
@@ -1643,11 +1707,12 @@ export default function ChatScreen() {
         throw error;
       }
 
-      // Update root message join_count
+      // Update root message join_count - force updated_at to trigger realtime
+      const newJoinCount = (threadRootMessage.join_count || 1) + 1;
       const { error: updateError } = await supabase
         .from('messages')
         .update({ 
-          join_count: (threadRootMessage.join_count || 1) + 1,
+          join_count: newJoinCount,
           updated_at: new Date().toISOString()
         })
         .eq('id', threadRootMessage.id);
@@ -1656,12 +1721,12 @@ export default function ChatScreen() {
         console.error('Error updating thread count:', updateError);
       } else {
         // Update local thread root message
-        setThreadRootMessage(prev => prev ? { ...prev, join_count: (prev.join_count || 1) + 1 } : null);
+        setThreadRootMessage(prev => prev ? { ...prev, join_count: newJoinCount } : null);
         
         // Update thread count without re-rendering all messages
         setThreadCounts(prev => ({ 
           ...prev, 
-          [threadRootMessage.id]: (threadRootMessage.join_count || 1) + 1 
+          [threadRootMessage.id]: newJoinCount 
         }));
       }
     } catch (error) {
@@ -1673,21 +1738,26 @@ export default function ChatScreen() {
   };
 
   // Create memoized renderMessage function
-  const renderMessage = useCallback(({ item }: { item: Message }) => (
-    <MemoizedMessage
-      item={item}
-      threadCounts={threadCounts}
-      joinedSprints={joinedSprints}
-      receipts={receipts}
-      reactions={reactionsMap[item.id]}
-      channelId={channelId as string}
-      onOpenReactionPicker={openReactionPicker}
-      onJoinSprint={joinSprint}
-      onOpenThread={openThread}
-      fetchParticipantAvatars={fetchParticipantAvatars}
-      formatTime={formatTime}
-    />
-  ), [threadCounts, joinedSprints, receipts, reactionsMap, channelId]);
+  const renderMessage = useCallback(({ item }: { item: Message }) => {
+    // Force re-render by using a key that changes with thread count
+    const threadCount = threadCounts[item.id] || item.join_count || 0;
+    return (
+      <MemoizedMessage
+        key={`msg-${item.id}-thread-${threadCount}`}
+        item={item}
+        threadCounts={threadCounts}
+        joinedSprints={joinedSprints}
+        receipts={receipts}
+        reactions={reactionsMap[item.id]}
+        channelId={channelId as string}
+        onOpenReactionPicker={openReactionPicker}
+        onJoinSprint={joinSprint}
+        onOpenThread={openThread}
+        fetchParticipantAvatars={fetchParticipantAvatars}
+        formatTime={formatTime}
+      />
+    );
+  }, [threadCounts, joinedSprints, receipts, reactionsMap, channelId]);
 
   if (loading) {
     return (
@@ -1729,6 +1799,7 @@ export default function ChatScreen() {
           data={messages}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id.toString()}
+          extraData={{ threadCounts, joinedSprints, receipts, reactionsMap }}
           className="flex-1 px-4"
           contentContainerStyle={{ paddingBottom: 10 }}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}

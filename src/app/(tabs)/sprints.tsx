@@ -1134,14 +1134,17 @@ Return the response in this exact JSON format:
           });
 
         if (!messageError) {
-          // Update join count on root message
-          await supabase
+          // Update join count on root message - force updated_at to trigger realtime
+          const newJoinCount = (rootMessage.join_count || 1) + 1;
+          const { error: updateError } = await supabase
             .from('messages')
             .update({ 
-              join_count: (rootMessage.join_count || 1) + 1,
+              join_count: newJoinCount,
               updated_at: new Date().toISOString()
             })
             .eq('id', rootMessage.id);
+            
+
         }
       } else {
         // No root message found - this shouldn't normally happen
