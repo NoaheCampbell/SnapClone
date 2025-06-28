@@ -42,11 +42,22 @@ interface CircleSuggestion {
   similarity_reason: string
 }
 
+interface CircleInvitation {
+  id: string;
+  circle_id: string;
+  circle_name: string;
+  from_user_id: string;
+  from_username: string;
+  from_avatar_url?: string;
+  created_at: string;
+}
+
 export default function FriendsScreen() {
   const { user } = useAuth()
   const router = useRouter()
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
+  const [circleInvitations, setCircleInvitations] = useState<CircleInvitation[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Profile[]>([])
@@ -59,6 +70,7 @@ export default function FriendsScreen() {
     if (user) {
       loadFriends()
       loadFriendRequests()
+      loadCircleInvitations()
       if (activeTab === 'circles') {
         loadCircleSuggestions()
       }
@@ -110,6 +122,22 @@ export default function FriendsScreen() {
       }
     } catch (error) {
       console.error('Error loading friend requests:', error)
+    }
+  }
+
+  const loadCircleInvitations = async () => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase.rpc('get_pending_circle_invitations')
+
+      if (error) {
+        console.error('Error loading circle invitations:', error)
+      } else {
+        setCircleInvitations(data || [])
+      }
+    } catch (error) {
+      console.error('Error loading circle invitations:', error)
     }
   }
 
@@ -356,6 +384,41 @@ export default function FriendsScreen() {
     }
   }
 
+  const respondToCircleInvitation = async (invitationId: string, response: 'accepted' | 'declined') => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase.rpc('respond_to_circle_invitation', {
+        p_invitation_id: invitationId,
+        p_response: response
+      })
+
+      if (error) throw error
+
+      if (data?.error) {
+        Alert.alert('Error', data.error)
+      } else if (response === 'accepted' && data?.circle_id) {
+        Alert.alert(
+          'Success',
+          `You've joined ${data.circle_name}!`,
+          [
+            {
+              text: 'Open Circle',
+              onPress: () => router.push(`/(pages)/chat?circleId=${data.circle_id}`)
+            },
+            { text: 'OK' }
+          ]
+        )
+      }
+
+      // Reload invitations
+      loadCircleInvitations()
+    } catch (error) {
+      console.error('Error responding to circle invitation:', error)
+      Alert.alert('Error', 'Failed to respond to invitation')
+    }
+  }
+
   const renderFriend = ({ item }: { item: Friend }) => (
     <View className="mx-6 mb-4 bg-gray-800/50 rounded-2xl p-4 flex-row items-center">
       <View className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mr-4">
@@ -497,6 +560,50 @@ export default function FriendsScreen() {
     </View>
   )
 
+  const renderCircleInvitation = ({ item }: { item: CircleInvitation }) => (
+    <View className="mx-6 mb-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl p-4">
+      <View className="flex-row items-center mb-3">
+        <View className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full items-center justify-center mr-4">
+          {item.from_avatar_url ? (
+            <Image 
+              source={{ uri: item.from_avatar_url }} 
+              className="w-16 h-16 rounded-full"
+            />
+          ) : (
+            <Image 
+              source={require('../../../assets/images/avatar-placeholder.png')} 
+              className="w-16 h-16 rounded-full"
+              resizeMode="cover"
+            />
+          )}
+        </View>
+        
+        <View className="flex-1">
+          <Text className="text-white text-lg font-bold">
+            {item.circle_name}
+          </Text>
+          <Text className="text-gray-400 text-sm">@{item.from_username} invited you</Text>
+          <Text className="text-purple-400 text-xs">to join this circle</Text>
+        </View>
+      </View>
+      
+      <View className="flex-row space-x-3">
+        <TouchableOpacity
+          onPress={() => respondToCircleInvitation(item.id, 'accepted')}
+          className="flex-1 bg-green-500 rounded-xl py-3 items-center"
+        >
+          <Text className="text-white font-bold">Accept</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => respondToCircleInvitation(item.id, 'declined')}
+          className="flex-1 bg-red-500 rounded-xl py-3 items-center"
+        >
+          <Text className="text-white font-bold">Decline</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+
   return (
     <SafeAreaView className="flex-1 bg-black">
       {/* Header */}
@@ -513,10 +620,10 @@ export default function FriendsScreen() {
           </Text>
         </View>
         <View className="flex-row space-x-3">
-          {activeTab === 'friends' && friendRequests.length > 0 && (
+          {activeTab === 'friends' && (friendRequests.length > 0 || circleInvitations.length > 0) && (
             <View className="relative">
               <View className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full items-center justify-center z-10">
-                <Text className="text-white text-xs font-bold">{friendRequests.length}</Text>
+                <Text className="text-white text-xs font-bold">{friendRequests.length + circleInvitations.length}</Text>
               </View>
               <TouchableOpacity 
                 onPress={() => router.push('/(pages)/search-friends' as any)}
@@ -588,24 +695,66 @@ export default function FriendsScreen() {
             <View className="flex-1 items-center justify-center">
               <Text className="text-white text-lg">Loading friends...</Text>
             </View>
-          ) : friends.length === 0 ? (
-            <View className="flex-1 items-center justify-center px-8">
-              <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
-                <Feather name="users" size={60} color="white" />
-              </View>
-              <Text className="text-white text-2xl font-bold text-center mb-4">No Friends Yet</Text>
-              <Text className="text-gray-400 text-center text-lg">
-                Start connecting with people to build your friend network
-              </Text>
-            </View>
           ) : (
-            <FlatList
-              data={friends}
-              renderItem={renderFriend}
-              keyExtractor={(item) => `${item.user_id}-${item.friend_id}`}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}
-            />
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+              {/* Friend Requests Section */}
+              {friendRequests.length > 0 && (
+                <View className="mb-6">
+                  <Text className="text-white text-lg font-bold px-6 mb-4">
+                    Friend Requests ({friendRequests.length})
+                  </Text>
+                  {friendRequests.map((request) => (
+                    <View key={request.id}>
+                      {renderFriendRequest({ item: request } as any)}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Circle Invitations Section */}
+              {circleInvitations.length > 0 && (
+                <View className="mb-6">
+                  <Text className="text-white text-lg font-bold px-6 mb-4">
+                    Circle Invitations ({circleInvitations.length})
+                  </Text>
+                  {circleInvitations.map((invitation) => (
+                    <View key={invitation.id}>
+                      {renderCircleInvitation({ item: invitation } as any)}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Friends List Section */}
+              <View>
+                <Text className="text-white text-lg font-bold px-6 mb-4">
+                  Your Friends ({friends.length})
+                </Text>
+                {friends.length === 0 ? (
+                  <View className="items-center justify-center px-8 py-16">
+                    <View className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full items-center justify-center mb-8">
+                      <Feather name="users" size={60} color="white" />
+                    </View>
+                    <Text className="text-white text-2xl font-bold text-center mb-4">No Friends Yet</Text>
+                    <Text className="text-gray-400 text-center text-lg">
+                      Start connecting with people to build your friend network
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => router.push('/(pages)/search-friends' as any)}
+                      className="mt-6 bg-blue-500 px-6 py-3 rounded-xl"
+                    >
+                      <Text className="text-white font-semibold">Find Friends</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  friends.map((friend) => (
+                    <View key={`${friend.user_id}-${friend.friend_id}`}>
+                      {renderFriend({ item: friend } as any)}
+                    </View>
+                  ))
+                )}
+              </View>
+            </ScrollView>
           )
         ) : (
           // Circles Tab

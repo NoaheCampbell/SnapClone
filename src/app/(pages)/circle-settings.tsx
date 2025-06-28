@@ -34,16 +34,8 @@ interface CircleDetails {
 interface Friend {
   user_id: string;
   username: string;
-}
-
-interface CircleInvite {
-  id: string;
-  invite_code: string;
-  created_by_username: string;
-  expires_at: string | null;
-  max_uses: number | null;
-  uses_count: number;
-  created_at: string;
+  avatar_url?: string;
+  has_pending_invite?: boolean;
 }
 
 export default function CircleSettingsScreen() {
@@ -66,14 +58,7 @@ export default function CircleSettingsScreen() {
   const [selectedNewMembers, setSelectedNewMembers] = useState<string[]>([]);
   const [addingMembers, setAddingMembers] = useState(false);
   
-  // Invite management
-  const [invites, setInvites] = useState<CircleInvite[]>([]);
-  const [showInvites, setShowInvites] = useState(false);
-  const [creatingInvite, setCreatingInvite] = useState(false);
-
   const [muteNotifications, setMuteNotifications] = useState<boolean>(false);
-
-  const [allowInvites, setAllowInvites] = useState<boolean>(true);
 
   useEffect(() => {
     if (circleId) {
@@ -122,17 +107,6 @@ export default function CircleSettingsScreen() {
       setNewName(data.name);
       setNewSprintMinutes(data.sprint_minutes);
       setNewTtlMinutes(data.ttl_minutes);
-      setAllowInvites(data.allow_member_invites);
-
-      // fetch allow_member_invites column directly (RPC may not include it)
-      const { data: allowRow } = await supabase
-        .from('circles')
-        .select('allow_member_invites')
-        .eq('id', circleId)
-        .single();
-      if (allowRow) {
-        setAllowInvites(allowRow.allow_member_invites);
-      }
 
     } catch (error) {
       console.error('Error loading circle details:', error);
@@ -341,55 +315,87 @@ export default function CircleSettingsScreen() {
     try {
       setAddingMembers(true);
 
-      // Add new members to circle_members table
-      const newMembers = selectedNewMembers.map(userId => ({
-        circle_id: circleId,
-        user_id: userId,
-        role: 'member'
-      }));
-
-      const { error: membersError } = await supabase
-        .from('circle_members')
-        .insert(newMembers);
-
-      if (membersError) throw membersError;
-
-      // Get the usernames of added members
-      const addedUsernames = availableFriends
-        .filter(f => selectedNewMembers.includes(f.user_id))
-        .map(f => f.username);
-
-      // Update local state
-      const newMemberObjects = selectedNewMembers.map(userId => {
-        const friend = availableFriends.find(f => f.user_id === userId);
-        return {
-          user_id: userId,
-          username: friend?.username || 'Unknown',
-          role: 'member'
-        };
-      });
-
-      setCircle(prev => prev ? {
-        ...prev,
-        members: [...prev.members, ...newMemberObjects]
-      } : null);
-
-      // Send system message
-      await supabase
-        .from('messages')
-        .insert({
+      if (circle?.visibility === 'public') {
+        // For public circles, directly add members
+        const newMembers = selectedNewMembers.map(userId => ({
           circle_id: circleId,
-          sender_id: currentUserId,
-          content: `${addedUsernames.join(', ')} ${addedUsernames.length === 1 ? 'was' : 'were'} added to the circle`
+          user_id: userId,
+          role: 'member'
+        }));
+
+        const { error: membersError } = await supabase
+          .from('circle_members')
+          .insert(newMembers);
+
+        if (membersError) throw membersError;
+
+        // Get the usernames of added members
+        const addedUsernames = availableFriends
+          .filter(f => selectedNewMembers.includes(f.user_id))
+          .map(f => f.username);
+
+        // Update local state
+        const newMemberObjects = selectedNewMembers.map(userId => {
+          const friend = availableFriends.find(f => f.user_id === userId);
+          return {
+            user_id: userId,
+            username: friend?.username || 'Unknown',
+            role: 'member'
+          };
         });
+
+        setCircle(prev => prev ? {
+          ...prev,
+          members: [...prev.members, ...newMemberObjects]
+        } : null);
+
+        // Send system message
+        await supabase
+          .from('messages')
+          .insert({
+            circle_id: circleId,
+            sender_id: currentUserId,
+            content: `${addedUsernames.join(', ')} ${addedUsernames.length === 1 ? 'was' : 'were'} added to the circle`
+          });
+
+        Alert.alert('Success', `Added ${selectedNewMembers.length} member${selectedNewMembers.length !== 1 ? 's' : ''}`);
+      } else {
+        // For private circles, send invitations
+        let successCount = 0;
+        const failedUsers = [];
+
+        for (const userId of selectedNewMembers) {
+          const { data, error } = await supabase.rpc('send_circle_invitation', {
+            p_circle_id: circleId,
+            p_to_user_id: userId
+          });
+
+          if (error || data?.error) {
+            const friend = availableFriends.find(f => f.user_id === userId);
+            failedUsers.push(friend?.username || 'Unknown');
+          } else {
+            successCount++;
+          }
+        }
+
+        if (successCount > 0) {
+          Alert.alert('Success', `Sent ${successCount} invitation${successCount !== 1 ? 's' : ''}`);
+        }
+        
+        if (failedUsers.length > 0) {
+          Alert.alert('Some invitations failed', `Could not invite: ${failedUsers.join(', ')}`);
+        }
+      }
 
       // Reset state
       setSelectedNewMembers([]);
       setShowAddMembers(false);
+      // Reload available friends to update invite status
+      loadAvailableFriends();
       
     } catch (error) {
       console.error('Error adding members:', error);
-      Alert.alert('Error', 'Failed to add members to the circle');
+      Alert.alert('Error', circle?.visibility === 'public' ? 'Failed to add members to the circle' : 'Failed to send invitations');
     } finally {
       setAddingMembers(false);
     }
@@ -454,88 +460,6 @@ export default function CircleSettingsScreen() {
         }
       ]
     );
-  };
-
-  const loadInvites = async () => {
-    try {
-      const { data, error } = await supabase.rpc('get_circle_invites', {
-        p_circle_id: circleId
-      });
-
-      if (error) throw error;
-      setInvites(data || []);
-    } catch (error) {
-      console.error('Error loading invites:', error);
-    }
-  };
-
-  const createInvite = async () => {
-    try {
-      setCreatingInvite(true);
-      
-      const { data, error } = await supabase.rpc('create_circle_invite', {
-        p_circle_id: circleId,
-        p_expires_hours: 168, // 7 days
-        p_max_uses: null // unlimited
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        Alert.alert('Error', data.error);
-        return;
-      }
-
-      Alert.alert(
-        'Invite Created',
-        `Invite code: ${data.invite_code}\n\nShare this code with others to let them join your circle.`,
-        [
-          { 
-            text: 'Copy Code', 
-            onPress: async () => {
-              await copyInviteCode(data.invite_code);
-              loadInvites();
-            }
-          },
-          { text: 'OK', onPress: () => loadInvites() }
-        ]
-      );
-    } catch (error) {
-      console.error('Error creating invite:', error);
-      Alert.alert('Error', 'Failed to create invite code');
-    } finally {
-      setCreatingInvite(false);
-    }
-  };
-
-  const revokeInvite = async (inviteId: string) => {
-    try {
-      const { data, error } = await supabase.rpc('revoke_circle_invite', {
-        p_invite_id: inviteId
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        Alert.alert('Error', data.error);
-        return;
-      }
-
-      loadInvites(); // Refresh the list
-    } catch (error) {
-      console.error('Error revoking invite:', error);
-      Alert.alert('Error', 'Failed to revoke invite');
-    }
-  };
-
-  const copyInviteCode = async (inviteCode: string) => {
-    try {
-      await Clipboard.setString(inviteCode);
-      Alert.alert('Copied!', `Invite code "${inviteCode}" copied to clipboard`);
-    } catch (error) {
-      console.error('Error copying to clipboard:', error);
-      Alert.alert('Error', 'Failed to copy invite code');
-    }
   };
 
   const toggleMute = async (value: boolean) => {
@@ -723,40 +647,6 @@ export default function CircleSettingsScreen() {
           </View>
         )}
 
-        {/* Invite Management */}
-        {canEdit && (
-          <View className="p-4 border-b border-gray-800">
-            <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-white text-lg font-bold">Invite Codes</Text>
-              <View className="flex-row items-center space-x-3">
-                <TouchableOpacity
-                  onPress={() => {
-                    loadInvites();
-                    setShowInvites(true);
-                  }}
-                  className="flex-row items-center"
-                >
-                  <Feather name="list" size={20} color="#60A5FA" />
-                  <Text className="text-blue-400 ml-1">View</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={createInvite}
-                  disabled={creatingInvite || (!isOwner && !allowInvites)}
-                  className="flex-row items-center"
-                >
-                  <Feather name="plus" size={20} color="#60A5FA" />
-                  <Text className="text-blue-400 ml-1">
-                    {creatingInvite ? 'Creating...' : 'Create'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <Text className="text-gray-400 text-sm">
-              Create invite codes to let others join this circle
-            </Text>
-          </View>
-        )}
-
         {/* Members */}
         <View className="p-4 border-b border-gray-800">
           <View className="flex-row items-center justify-between mb-3">
@@ -770,7 +660,9 @@ export default function CircleSettingsScreen() {
                 className="flex-row items-center"
               >
                 <Feather name="user-plus" size={20} color="#60A5FA" />
-                <Text className="text-blue-400 ml-1">Add</Text>
+                <Text className="text-blue-400 ml-1">
+                  {circle.visibility === 'public' ? 'Add' : 'Invite'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -821,43 +713,6 @@ export default function CircleSettingsScreen() {
             </TouchableOpacity>
           )}
         </View>
-
-        {/* Allow invites section */}
-        {isOwner && (
-          <View className="p-4 border-b border-gray-800">
-            <Text className="text-white text-lg font-bold mb-3">Member Invite Permissions</Text>
-            <View className="flex-row items-center justify-between p-3 bg-gray-800 rounded-lg">
-              <View className="flex-row items-center flex-1">
-                <Feather name="link" size={20} color="white" style={{ marginRight: 12 }} />
-                <View className="flex-1">
-                  <Text className="text-white font-medium">Allow members to create invite codes</Text>
-                </View>
-              </View>
-              <Switch
-                value={allowInvites}
-                onValueChange={async (val) => {
-                  setAllowInvites(val);
-                  
-                  const { error } = await supabase
-                    .from('circles')
-                    .update({ allow_member_invites: val })
-                    .eq('id', circle.id);
-                  
-                  if (error) {
-                    console.error('Error updating allow_member_invites:', error);
-                    setAllowInvites(!val);
-                    Alert.alert('Update failed', 'Could not change invite permissions');
-                  } else {
-                    // update local circle object so other parts reflect change
-                    setCircle((prev: any) => ({ ...prev, allow_member_invites: val }));
-                  }
-                }}
-                trackColor={{ false:'#767577',true:'#81b0ff'}}
-                thumbColor={allowInvites ? '#f5dd4b' : '#f4f3f4'}
-              />
-            </View>
-          </View>
-        )}
       </ScrollView>
 
       {/* Add Members Modal */}
@@ -871,7 +726,9 @@ export default function CircleSettingsScreen() {
             <TouchableOpacity onPress={() => setShowAddMembers(false)}>
               <Text className="text-blue-400 text-lg">Cancel</Text>
             </TouchableOpacity>
-            <Text className="text-white text-lg font-semibold">Add Members</Text>
+            <Text className="text-white text-lg font-semibold">
+              {circle?.visibility === 'public' ? 'Add Members' : 'Invite Friends'}
+            </Text>
             <TouchableOpacity
               onPress={addMembers}
               disabled={selectedNewMembers.length === 0 || addingMembers}
@@ -879,7 +736,7 @@ export default function CircleSettingsScreen() {
               <Text className={`text-lg font-semibold ${
                 selectedNewMembers.length > 0 && !addingMembers ? 'text-blue-400' : 'text-gray-500'
               }`}>
-                {addingMembers ? 'Adding...' : 'Add'}
+                {addingMembers ? 'Processing...' : (circle?.visibility === 'public' ? 'Add' : 'Invite')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -926,111 +783,6 @@ export default function CircleSettingsScreen() {
                 </Text>
                 <Text className="text-gray-500 text-sm mt-2 text-center">
                   All your friends are already in this circle
-                </Text>
-              </View>
-            }
-          />
-        </SafeAreaView>
-      </Modal>
-
-      {/* Invites Modal */}
-      <Modal
-        visible={showInvites}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <SafeAreaView className="flex-1 bg-black">
-          <View className="flex-row items-center justify-between p-4 border-b border-gray-800">
-            <TouchableOpacity onPress={() => setShowInvites(false)}>
-              <Text className="text-blue-400 text-lg">Close</Text>
-            </TouchableOpacity>
-            <Text className="text-white text-lg font-semibold">Invite Codes</Text>
-            <TouchableOpacity
-              onPress={createInvite}
-              disabled={creatingInvite || (!isOwner && !allowInvites)}
-            >
-              <Text className={`text-lg font-semibold ${
-                !creatingInvite ? 'text-blue-400' : 'text-gray-500'
-              }`}>
-                {creatingInvite ? 'Creating...' : 'New'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={invites}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const isExpired = item.expires_at && new Date(item.expires_at) < new Date();
-              const isMaxedOut = item.max_uses && item.uses_count >= item.max_uses;
-              
-              return (
-                <View className="p-4 border-b border-gray-800">
-                  <View className="flex-row items-center justify-between mb-2">
-                    <TouchableOpacity 
-                      onPress={() => copyInviteCode(item.invite_code)}
-                      className="flex-1 flex-row items-center"
-                    >
-                      <Text className="text-white font-mono text-lg mr-2">{item.invite_code}</Text>
-                      <Feather name="copy" size={16} color="#60A5FA" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Alert.alert(
-                          'Revoke Invite',
-                          'Are you sure you want to revoke this invite code?',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Revoke',
-                              style: 'destructive',
-                              onPress: () => revokeInvite(item.id)
-                            }
-                          ]
-                        );
-                      }}
-                      className="p-2"
-                    >
-                      <Feather name="trash-2" size={16} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
-                  
-                  <View className="flex-row items-center justify-between">
-                    <View>
-                      <Text className="text-gray-400 text-sm">
-                        Created by {item.created_by_username}
-                      </Text>
-                      <Text className="text-gray-400 text-sm">
-                        Uses: {item.uses_count}{item.max_uses ? `/${item.max_uses}` : ' (unlimited)'}
-                      </Text>
-                      {item.expires_at && (
-                        <Text className={`text-sm ${isExpired ? 'text-red-400' : 'text-gray-400'}`}>
-                          {isExpired ? 'Expired' : `Expires ${new Date(item.expires_at).toLocaleDateString()}`}
-                        </Text>
-                      )}
-                    </View>
-                    
-                    <View className="flex-row items-center">
-                      {(isExpired || isMaxedOut) && (
-                        <View className="bg-red-500 px-2 py-1 rounded">
-                          <Text className="text-white text-xs">
-                            {isExpired ? 'Expired' : 'Max Uses'}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              );
-            }}
-            ListEmptyComponent={
-              <View className="flex-1 justify-center items-center p-8">
-                <Feather name="link" size={64} color="gray" />
-                <Text className="text-gray-400 text-lg mt-4 text-center">
-                  No invite codes yet
-                </Text>
-                <Text className="text-gray-500 text-sm mt-2 text-center">
-                  Create an invite code to let others join this circle
                 </Text>
               </View>
             }

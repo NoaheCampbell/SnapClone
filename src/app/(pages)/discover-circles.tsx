@@ -29,8 +29,6 @@ export default function DiscoverCirclesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [joining, setJoining] = useState<string | null>(null);
-  const [inviteCode, setInviteCode] = useState('');
-  const [joiningByCode, setJoiningByCode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [allCircles, setAllCircles] = useState<PublicCircle[]>([]);
   const [filteredCircles, setFilteredCircles] = useState<PublicCircle[]>([]);
@@ -115,51 +113,6 @@ export default function DiscoverCirclesScreen() {
       Alert.alert('Error', 'Failed to join circle');
     } finally {
       setJoining(null);
-    }
-  };
-
-  const joinByInviteCode = async () => {
-    if (!inviteCode.trim()) {
-      Alert.alert('Error', 'Please enter an invite code');
-      return;
-    }
-
-    try {
-      setJoiningByCode(true);
-      
-      const { data, error } = await supabase.rpc('join_circle_by_invite', {
-        p_invite_code: inviteCode.trim()
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        Alert.alert('Error', data.error);
-        return;
-      }
-
-      Alert.alert(
-        'Success',
-        `You've joined "${data.circle_name}"!`,
-        [
-          {
-            text: 'Open Circle',
-            onPress: () => {
-              router.back();
-              router.push(`/(pages)/chat?circleId=${data.circle_id}`);
-            }
-          },
-          { text: 'OK' }
-        ]
-      );
-
-      setInviteCode('');
-      loadPublicCircles();
-    } catch (error) {
-      console.error('Error joining by invite code:', error);
-      Alert.alert('Error', 'Failed to join circle');
-    } finally {
-      setJoiningByCode(false);
     }
   };
 
@@ -256,33 +209,6 @@ export default function DiscoverCirclesScreen() {
         </TouchableOpacity>
         <Text className="text-white text-lg font-semibold">Discover Circles</Text>
         <View style={{ width: 24 }} />
-      </View>
-
-      {/* Join by Invite Code */}
-      <View className="p-4 border-b border-gray-800">
-        <Text className="text-white text-lg font-bold mb-3">Join by Invite Code</Text>
-        <View className="flex-row items-center">
-          <TextInput
-            value={inviteCode}
-            onChangeText={setInviteCode}
-            className="flex-1 bg-gray-800 text-white p-3 rounded-lg mr-3"
-            placeholder="Enter invite code"
-            placeholderTextColor="#9CA3AF"
-            autoCapitalize="characters"
-            autoCorrect={false}
-          />
-          <TouchableOpacity
-            onPress={joinByInviteCode}
-            disabled={joiningByCode || !inviteCode.trim()}
-            className={`px-6 py-3 rounded-lg min-w-[80px] ${
-              inviteCode.trim() && !joiningByCode ? 'bg-blue-500' : 'bg-gray-600'
-            }`}
-          >
-            <Text className="text-white font-semibold text-center">
-              {joiningByCode ? 'Joining...' : 'Join'}
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
       {/* Search Bar */}
