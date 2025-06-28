@@ -217,6 +217,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   
   const cameraRef = useRef<CameraView>(null);
   const containerRef = useRef<View>(null);
+  const captureAreaRef = useRef<View>(null);
   const captureResultRef = useRef<string | undefined>(undefined);
   const currentEditingTextRef = useRef<{ id: string; text: string } | null>(null);
   const isEditingRef = useRef(false);
@@ -496,19 +497,44 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
         <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
           <GestureDetector gesture={backgroundTapGesture}>
             <View style={{ flex: 1 }}>
-              {capturedPhoto ? (
-                <View style={{ flex: 1 }}>
-                  {selectedFilter.component ? (
-                    <selectedFilter.component style={{ flex: 1 }}>
+              {/* Capture Area - only this content will be captured */}
+              <View ref={captureAreaRef} collapsable={false} style={{ flex: 1 }}>
+                {capturedPhoto ? (
+                  <View style={{ flex: 1 }}>
+                    {selectedFilter.component ? (
+                      <selectedFilter.component style={{ flex: 1 }}>
+                        <Image 
+                          source={{ uri: capturedPhoto }} 
+                          style={{ flex: 1 }} 
+                          resizeMode="cover" 
+                          onLoadEnd={async () => {
+                            setPhotoLoaded(true);
+                            if (pendingCapture && captureAreaRef.current) {
+                              try {
+                                const capturedUri = await captureRef(captureAreaRef.current, {
+                                  format: 'jpg',
+                                  quality: 0.9,
+                                });
+                                captureResultRef.current = capturedUri;
+                              } catch (err) {
+                                console.warn('Failed to capture filtered image after load', err);
+                              } finally {
+                                setPendingCapture(false);
+                              }
+                            }
+                          }}
+                        />
+                      </selectedFilter.component>
+                    ) : (
                       <Image 
                         source={{ uri: capturedPhoto }} 
                         style={{ flex: 1 }} 
                         resizeMode="cover" 
                         onLoadEnd={async () => {
                           setPhotoLoaded(true);
-                          if (pendingCapture && containerRef.current) {
+                          if (pendingCapture && captureAreaRef.current) {
                             try {
-                              const capturedUri = await captureRef(containerRef.current, {
+                              const capturedUri = await captureRef(captureAreaRef.current, {
                                 format: 'jpg',
                                 quality: 0.9,
                               });
@@ -521,46 +547,37 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
                           }
                         }}
                       />
-                    </selectedFilter.component>
-                  ) : (
-                    <Image 
-                      source={{ uri: capturedPhoto }} 
-                      style={{ flex: 1 }} 
-                      resizeMode="cover" 
-                      onLoadEnd={async () => {
-                        setPhotoLoaded(true);
-                        if (pendingCapture && containerRef.current) {
-                          try {
-                            const capturedUri = await captureRef(containerRef.current, {
-                              format: 'jpg',
-                              quality: 0.9,
-                            });
-                            captureResultRef.current = capturedUri;
-                          } catch (err) {
-                            console.warn('Failed to capture filtered image after load', err);
-                          } finally {
-                            setPendingCapture(false);
-                          }
-                        }
-                      }}
-                    />
-                  )}
-                  {selectedFilter.overlayStyle ? (
-                    <View
-                      style={{
-                        ...selectedFilter.overlayStyle,
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                      }}
-                    />
-                  ) : null}
-                </View>
-              ) : (
-                renderFilteredCamera()
-              )}
+                    )}
+                    {selectedFilter.overlayStyle ? (
+                      <View
+                        style={{
+                          ...selectedFilter.overlayStyle,
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                        }}
+                      />
+                    ) : null}
+                  </View>
+                ) : (
+                  renderFilteredCamera()
+                )}
+                
+                {/* Text overlays - move inside capture area */}
+                {(!postOptionsVisible || pendingCapture) && textOverlays.map((textOverlay) => (
+                  <DraggableText 
+                    key={textOverlay.id} 
+                    textOverlay={textOverlay}
+                    updateTextOverlay={updateTextOverlay}
+                    startEditingText={startEditingText}
+                    finishEditingText={finishEditingText}
+                    selectedTextId={selectedTextId}
+                    currentEditingTextRef={currentEditingTextRef}
+                  />
+                ))}
+              </View>
             </View>
           </GestureDetector>
           
@@ -572,19 +589,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
             bottom: 0,
             pointerEvents: 'box-none'
           }}>
-            {/* Text overlays */}
-            {(!postOptionsVisible || pendingCapture) && textOverlays.map((textOverlay) => (
-              <DraggableText 
-                key={textOverlay.id} 
-                textOverlay={textOverlay}
-                updateTextOverlay={updateTextOverlay}
-                startEditingText={startEditingText}
-                finishEditingText={finishEditingText}
-                selectedTextId={selectedTextId}
-                currentEditingTextRef={currentEditingTextRef}
-              />
-            ))}
-
+            {/* UI Controls - these are outside capture area */}
             {!postOptionsVisible && (
               <View style={{ flex: 1, justifyContent: 'space-between' }}>
                 {/* Top Controls */}
