@@ -8,6 +8,9 @@
     "scheme": "snapclone",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
+    "description": "Transform your study sessions with SprintLoop - the app that combines focused sprints with intelligent summaries and AI-powered quizzes. Join study circles, track streaks, and accelerate your learning with friends.",
+    "keywords": ["study", "education", "learning", "productivity", "focus", "ai", "quiz", "social"],
+    "privacy": "unlisted",
     "splash": {
       "image": "./assets/images/sprintloop.png",
       "resizeMode": "contain",
@@ -15,10 +18,16 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.sprintloop.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
+        "NSCameraUsageDescription": "SprintLoop needs camera access to capture study materials and share progress with your study circles.",
+        "NSPhotoLibraryUsageDescription": "SprintLoop needs photo library access to select images for your study sessions.",
+        "NSMicrophoneUsageDescription": "SprintLoop needs microphone access for video recording during study sessions."
       },
-      "bundleIdentifier": "com.anonymous.SprintLoop"
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -27,9 +36,11 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.anonymous.SprintLoop"
+      "package": "com.sprintloop.app",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
