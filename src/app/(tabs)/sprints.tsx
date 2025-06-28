@@ -44,16 +44,7 @@ export default function SprintsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const flatListRef = useRef(null);
-  const [selectedCircleId, setSelectedCircleId] = useState<string>('');
-  const [sprintTopic, setSprintTopic] = useState('');
-  const [sprintGoals, setSprintGoals] = useState('');
-  const [sprintDuration, setSprintDuration] = useState(25);
-  const [customDuration, setCustomDuration] = useState('');
-  const [quizQuestionCount, setQuizQuestionCount] = useState(3);
-  const [creatingSprintLoading, setCreatingSprintLoading] = useState(false);
-  const [showStartCamera, setShowStartCamera] = useState(false);
   const [showEndCamera, setShowEndCamera] = useState(false);
-  const [startPhotoUrl, setStartPhotoUrl] = useState<string>('');
   const [endingSprintId, setEndingSprintId] = useState<string>('');
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
 
@@ -330,6 +321,29 @@ export default function SprintsTab() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Upload photo to Supabase storage
+      const ext = 'jpg'; // Sprint photos are always JPG from camera
+      const path = `sprints/${endingSprintId}/${Date.now()}.${ext}`;
+
+      // Read file as base64 and convert to ArrayBuffer
+      const base64 = await FileSystem.readAsStringAsync(photoUrl, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      const arrayBuffer = decode(base64);
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('chat-media')
+        .upload(path, arrayBuffer, {
+          contentType: 'image/jpeg'
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path);
+      const publicPhotoUrl = data.publicUrl;
+
       // Get sprint details first
       const { data: sprint } = await supabase
         .from('sprints')
@@ -343,7 +357,7 @@ export default function SprintsTab() {
         .update({ 
           ends_at: new Date().toISOString(),
           stopped_early: true,
-          end_media_url: photoUrl
+          end_media_url: publicPhotoUrl
         })
         .eq('id', endingSprintId);
 
@@ -390,384 +404,6 @@ export default function SprintsTab() {
       console.error('Error completing sprint:', error);
       Alert.alert('Error', 'Failed to complete sprint. Please try again.');
     }
-  };
-
-  const handleStartPhoto = (photoUrl: string) => {
-    setStartPhotoUrl(photoUrl);
-    setShowStartCamera(false); // Close camera immediately
-    // Continue with sprint creation
-    createSprintWithPhoto(photoUrl);
-  };
-
-  const uploadSprintPhoto = async (photoUri: string, sprintId: string) => {
-    try {
-      const ext = 'jpg'; // Sprint photos are always JPG from camera
-      const path = `sprints/${sprintId}/${Date.now()}.${ext}`;
-
-      // Read file as base64 and convert to ArrayBuffer
-      const base64 = await FileSystem.readAsStringAsync(photoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      
-      const arrayBuffer = decode(base64);
-
-      const { error: uploadError } = await supabase
-        .storage
-        .from('chat-media')
-        .upload(path, arrayBuffer, {
-          contentType: 'image/jpeg'
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data } = await supabase.storage.from('chat-media').getPublicUrl(path);
-      return data.publicUrl;
-    } catch (error) {
-      console.error('Error uploading sprint photo:', error);
-      throw error;
-    }
-  };
-
-  const createSprintWithPhoto = async (photoUrl: string) => {
-    if (!sprintTopic.trim() || creatingSprintLoading) return;
-    
-    // Validate duration
-    const duration = parseInt(customDuration);
-    if (isNaN(duration) || duration < 1 || duration > 180) {
-      Alert.alert('Invalid Duration', 'Please enter a duration between 1 and 180 minutes.');
-      return;
-    }
-    
-    try {
-      setCreatingSprintLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Create sprint first to get ID for photo upload
-      const endsAt = new Date(Date.now() + duration * 60 * 1000);
-
-      const { data: sprint, error: sprintError } = await supabase
-        .from('sprints')
-        .insert({
-          circle_id: selectedCircleId,
-          user_id: user.id,
-          topic: sprintTopic.trim(),
-          goals: sprintGoals.trim(),
-          quiz_question_count: quizQuestionCount,
-          tags: [],
-          ends_at: endsAt.toISOString(),
-          // Don't set media_url yet - we'll update it after upload
-        })
-        .select()
-        .single();
-
-      if (sprintError) throw sprintError;
-
-      // Upload photo to Supabase storage and get public URL
-      const publicPhotoUrl = await uploadSprintPhoto(photoUrl, sprint.id);
-
-      // Update sprint with the uploaded photo URL
-      const { error: updateError } = await supabase
-        .from('sprints')
-        .update({ media_url: publicPhotoUrl })
-        .eq('id', sprint.id);
-
-      if (updateError) throw updateError;
-
-      // Send a system message to the circle about the sprint start
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('user_id', user.id)
-        .single();
-
-      const username = profile?.username || 'Someone';
-      
-      // Create the initial sprint message (which will be the thread root)
-      const { data: newMessage, error: messageError } = await supabase
-        .from('messages')
-        .insert({
-          circle_id: selectedCircleId,
-          sender_id: user.id,
-          sprint_id: sprint.id,
-          content: `🏃‍♀️ ${username} started a ${duration}-minute sprint: "${sprintTopic}"`,
-          media_url: publicPhotoUrl,
-          join_count: 1
-        })
-        .select()
-        .single();
-
-      if (messageError) {
-        console.error('Error sending sprint notification:', messageError);
-      } else if (newMessage) {
-        // Set thread_root_id to itself to mark it as a root message
-        await supabase
-          .from('messages')
-          .update({ thread_root_id: newMessage.id })
-          .eq('id', newMessage.id);
-      }
-
-      // Generate quiz questions in the background
-      generateQuizForSprint(sprint.id, sprintTopic, sprintGoals, quizQuestionCount);
-
-      // Add creator as participant
-      await supabase
-        .from('sprint_participants')
-        .upsert({ sprint_id: sprint.id, user_id: user.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
-
-      setShowStartCamera(false);
-      setStartPhotoUrl('');
-      const currentTopic = sprintTopic; // Store before clearing
-      setSprintTopic(''); // Clear form
-      setSprintGoals(''); // Clear form
-      setCustomDuration('25'); // Reset to default
-      Alert.alert(
-        'Sprint Started!', 
-        `Your ${currentTopic} sprint has begun. Quiz questions are being generated in the background - they'll be ready when your sprint ends. Good luck!`
-      );
-      loadData(); // Refresh the data
-    } catch (error) {
-      console.error('Error starting sprint:', error);
-      Alert.alert('Error', 'Failed to start sprint. Please try again.');
-    } finally {
-      setCreatingSprintLoading(false);
-    }
-  };
-
-  const navigateToCreateSprint = (circleId: string) => {
-    setSelectedCircleId(circleId);
-    // Navigate to create sprint page
-    router.push(`/(pages)/create-sprint?circleId=${circleId}`);
-  };
-
-  const openQuizResults = (sprintId: string, sprintTopic: string) => {
-    // Navigate to quiz results page
-    router.push({
-      pathname: '/(pages)/quiz-results' as any,
-      params: { sprintId, sprintTopic }
-    });
-  };
-
-  const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
-    try {
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Check if summary already exists for this sprint
-      let summary;
-      const { data: existingSummary } = await supabase
-        .from('summaries')
-        .select('id, bullets, tags')
-        .eq('sprint_id', sprintId)
-        .single();
-
-      if (existingSummary) {
-        summary = existingSummary;
-      } else {
-        // Generate AI summary with RAG using edge function
-        try {
-          const summaryResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateSummaryWithRAG`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({
-              sprintId,
-              topic,
-              goals,
-              tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
-            })
-          });
-
-          if (summaryResponse.ok) {
-            const summaryResult = await summaryResponse.json();
-            summary = summaryResult.summary;
-          } else {
-            throw new Error('Summary generation failed');
-          }
-        } catch (error) {
-          console.error('RAG summary generation failed, using fallback:', error);
-          // Fallback to simple summary
-          const { data: newSummary, error: summaryError } = await supabase
-            .from('summaries')
-            .insert({
-              sprint_id: sprintId,
-              bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
-              tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
-            })
-            .select()
-            .single();
-
-          if (summaryError) {
-            console.error('Error creating fallback summary:', summaryError);
-            return;
-          }
-          summary = newSummary;
-        }
-      }
-
-      // Check if quiz already exists for this summary
-      const { data: existingQuiz } = await supabase
-        .from('quizzes')
-        .select('id')
-        .eq('summary_id', summary.id)
-        .single();
-
-      if (existingQuiz) {
-        return;
-      }
-
-      // Generate gap-aware quiz using RAG edge function
-      try {
-        const gapAwareQuizResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateGapAwareQuiz`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            sprintId,
-            topic,
-            goals,
-            tags: summary.tags || [],
-            questionCount,
-            userId: user.id
-          })
-        });
-
-        let quizContent;
-        if (gapAwareQuizResponse.ok) {
-          const gapAwareResult = await gapAwareQuizResponse.json();
-          quizContent = gapAwareResult.quiz;
-        } else {
-          throw new Error('Gap-aware quiz generation failed');
-        }
-
-        if (quizContent) {
-          // Store the quiz in the database
-          const { error: quizError } = await supabase
-            .from('quizzes')
-            .insert({
-              summary_id: summary.id,
-              mcq_json: quizContent
-            });
-
-          if (quizError) {
-            console.error('Error storing quiz:', quizError);
-          }
-        }
-      } catch (error) {
-        console.error('RAG quiz generation failed, using fallback:', error);
-        // Fallback to simple quiz generation
-        const quizContent = await generateQuizWithChatGPT(topic, goals, questionCount);
-        
-        if (quizContent) {
-          const { error: quizError } = await supabase
-            .from('quizzes')
-            .insert({
-              summary_id: summary.id,
-              mcq_json: quizContent
-            });
-
-          if (quizError) {
-            console.error('Error storing fallback quiz:', quizError);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error generating quiz for sprint:', error);
-    }
-  };
-
-  const generateQuizWithChatGPT = async (topic: string, goals: string, questionCount: number, maxRetries = 3) => {
-    const prompt = `Generate a quiz with exactly ${questionCount} multiple choice questions based on this study sprint:
-
-Topic: ${topic}
-Goals: ${goals}
-
-The questions should test understanding of the topic and achievement of the stated goals. Each question should have 4 options with one correct answer.
-
-Return the response in this exact JSON format:
-{
-  "questions": [
-    {
-      "question": "Question text here?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correct_answer": 0
-    }
-  ]
-}`;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a helpful assistant that generates educational quiz questions. Always respond with valid JSON only.'
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ],
-            max_tokens: 1500,
-            temperature: 0.7
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`OpenAI API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const quizContent = JSON.parse(data.choices[0].message.content);
-        
-        return quizContent;
-      } catch (error) {
-        console.error(`Quiz generation attempt ${attempt} failed:`, error);
-        
-        if (attempt === maxRetries) {
-          console.error('All quiz generation attempts failed');
-          return null;
-        }
-        
-        // Exponential backoff: wait 1s, 2s, 4s between retries
-        const delay = Math.pow(2, attempt - 1) * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-    
-    return null;
-  };
-
-  const createSprint = async () => {
-    if (!sprintTopic.trim() || creatingSprintLoading) return;
-    
-    if (!sprintGoals.trim()) {
-      Alert.alert('Missing Goals', 'Please enter your study goals to help generate better quiz questions.');
-      return;
-    }
-    
-    // Validate duration
-    const duration = parseInt(customDuration);
-    if (isNaN(duration) || duration < 1 || duration > 180) {
-      Alert.alert('Invalid Duration', 'Please enter a duration between 1 and 180 minutes.');
-      return;
-    }
-    
-    // Show camera to take start photo
-    setShowStartCamera(true);
   };
 
   useEffect(() => {
@@ -835,13 +471,18 @@ Return the response in this exact JSON format:
       } else if (params.copyFrom) {
         const sprint = recentSprints.find(s => s.id === params.copyFrom);
         if (sprint) {
-          setSelectedCircleId(sprint.circle_id);
-          setSprintTopic(sprint.topic);
-          setSprintGoals(sprint.goals || '');
+          // Navigate to create sprint page with prefilled data
           const duration = Math.round((new Date(sprint.ends_at).getTime() - new Date(sprint.started_at).getTime()) / (1000 * 60));
-          setCustomDuration(duration.toString());
-          setQuizQuestionCount(sprint.quiz_question_count || 3);
-          setShowStartCamera(true);
+          router.push({
+            pathname: '/(pages)/create-sprint',
+            params: {
+              circleId: sprint.circle_id,
+              prefillTopic: sprint.topic,
+              prefillGoals: sprint.goals || '',
+              prefillDuration: duration.toString(),
+              prefillQuestionCount: (sprint.quiz_question_count || 3).toString()
+            }
+          });
         }
         // Clear the parameter to prevent re-triggering
         router.setParams({ copyFrom: undefined });
@@ -1124,6 +765,19 @@ Return the response in this exact JSON format:
     }
   };
 
+  const navigateToCreateSprint = (circleId: string) => {
+    // Navigate to create sprint page
+    router.push(`/(pages)/create-sprint?circleId=${circleId}`);
+  };
+
+  const openQuizResults = (sprintId: string, sprintTopic: string) => {
+    // Navigate to quiz results page
+    router.push({
+      pathname: '/(pages)/quiz-results' as any,
+      params: { sprintId, sprintTopic }
+    });
+  };
+
   if (!user) {
     return (
       <SafeAreaView className="flex-1 bg-black justify-center items-center" edges={['top', 'left', 'right']}>
@@ -1217,18 +871,6 @@ Return the response in this exact JSON format:
       </View>
 
 
-
-      {/* Sprint Start Camera */}
-      {showStartCamera && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }}>
-          <SprintCamera
-            onCapture={handleStartPhoto}
-            onCancel={() => {
-              setShowStartCamera(false);
-            }}
-          />
-        </View>
-      )}
 
       {/* Sprint End Camera */}
       {showEndCamera && (

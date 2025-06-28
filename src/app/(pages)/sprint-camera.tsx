@@ -5,10 +5,96 @@ import SprintCamera from '../../components/SprintCamera';
 import { supabase } from '../../../lib/supabase';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
+import { useAuth } from '../../contexts/AuthContext';
+
+// Function to generate quiz for sprint (moved from create-sprint.tsx)
+const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Generate AI summary with RAG using edge function
+    const summaryResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateSummaryWithRAG`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        sprintId,
+        topic,
+        goals,
+        tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
+      })
+    });
+
+    let summary;
+    if (summaryResponse.ok) {
+      const summaryResult = await summaryResponse.json();
+      summary = summaryResult.summary;
+    } else {
+      // Fallback to simple summary
+      const { data: newSummary } = await supabase
+        .from('summaries')
+        .insert({
+          sprint_id: sprintId,
+          bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
+          tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
+        })
+        .select()
+        .single();
+      summary = newSummary;
+    }
+
+    if (!summary) return;
+
+    // Generate gap-aware quiz using RAG edge function
+    const gapAwareQuizResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateGapAwareQuiz`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        sprintId,
+        topic,
+        goals,
+        tags: summary.tags || [],
+        questionCount,
+        userId: user.id
+      })
+    });
+
+    if (gapAwareQuizResponse.ok) {
+      const gapAwareResult = await gapAwareQuizResponse.json();
+      const quizContent = gapAwareResult.quiz;
+      
+      if (quizContent) {
+        await supabase
+          .from('quizzes')
+          .insert({
+            summary_id: summary.id,
+            mcq_json: quizContent
+          });
+      }
+    }
+  } catch (error) {
+    console.error('Error generating quiz for sprint:', error);
+  }
+};
 
 export default function SprintCameraPage() {
   const router = useRouter();
-  const { sprintId, isNewSprint } = useLocalSearchParams<{ sprintId: string; isNewSprint?: string }>();
+  const { user } = useAuth();
+  const params = useLocalSearchParams<{ 
+    sprintId?: string; 
+    isNewSprint?: string;
+    circleId?: string;
+    topic?: string;
+    goals?: string;
+    duration?: string;
+    questionCount?: string;
+  }>();
 
   const uploadSprintPhoto = async (photoUri: string, sprintId: string) => {
     try {
@@ -39,16 +125,96 @@ export default function SprintCameraPage() {
     }
   };
 
-  const handleCapture = async (photoUrl: string) => {
+  const createNewSprint = async (photoUrl: string) => {
+    if (!params.circleId || !params.topic || !params.duration || !user) return;
+
+    try {
+      // Upload photo first - generate a temporary ID for the photo path
+      const tempSprintId = Date.now().toString() + '-' + Math.random().toString(36).substring(2);
+      const publicPhotoUrl = await uploadSprintPhoto(photoUrl, tempSprintId);
+
+      // Create sprint with photo URL all at once
+      const durationMinutes = parseInt(params.duration);
+      const endsAt = new Date();
+      endsAt.setMinutes(endsAt.getMinutes() + durationMinutes);
+
+      const { data: sprint, error } = await supabase
+        .from('sprints')
+        .insert({
+          circle_id: params.circleId,
+          user_id: user.id,
+          topic: params.topic,
+          goals: params.goals || '',
+          quiz_question_count: parseInt(params.questionCount || '3'),
+          ends_at: endsAt.toISOString(),
+          tags: [],
+          media_url: publicPhotoUrl
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add creator as participant
+      await supabase
+        .from('sprint_participants')
+        .upsert({ sprint_id: sprint.id, user_id: user.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
+
+      // Get username for message
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', user.id)
+        .single();
+
+      const username = profile?.username || 'Someone';
+      
+      // Create the initial sprint message with photo
+      const { data: newMessage, error: messageError } = await supabase
+        .from('messages')
+        .insert({
+          circle_id: params.circleId,
+          sender_id: user.id,
+          sprint_id: sprint.id,
+          content: `🏃‍♀️ ${username} started a ${durationMinutes}-minute sprint: "${params.topic}"`,
+          media_url: publicPhotoUrl,
+          join_count: 1
+        })
+        .select()
+        .single();
+
+      if (!messageError && newMessage) {
+        // Set thread_root_id to itself to mark it as a root message
+        await supabase
+          .from('messages')
+          .update({ thread_root_id: newMessage.id })
+          .eq('id', newMessage.id);
+      }
+
+      // Generate quiz in the background (don't await)
+      generateQuizForSprint(sprint.id, params.topic, params.goals || '', parseInt(params.questionCount || '3'));
+
+      // Navigate to sprints tab
+      router.replace('/(tabs)/sprints');
+      Alert.alert('Sprint Started!', `Your ${params.topic} sprint has begun. Good luck!`);
+    } catch (error) {
+      console.error('Error creating sprint:', error);
+      Alert.alert('Error', 'Failed to create sprint. Please try again.');
+    }
+  };
+
+  const updateExistingSprint = async (photoUrl: string) => {
+    if (!params.sprintId) return;
+
     try {
       // Upload photo to Supabase storage
-      const publicPhotoUrl = await uploadSprintPhoto(photoUrl, sprintId);
+      const publicPhotoUrl = await uploadSprintPhoto(photoUrl, params.sprintId);
 
       // Update sprint with the uploaded photo URL
       const { error: updateError } = await supabase
         .from('sprints')
         .update({ media_url: publicPhotoUrl })
-        .eq('id', sprintId);
+        .eq('id', params.sprintId);
 
       if (updateError) throw updateError;
 
@@ -56,7 +222,7 @@ export default function SprintCameraPage() {
       const { data: messages } = await supabase
         .from('messages')
         .select('id, thread_root_id')
-        .eq('sprint_id', sprintId);
+        .eq('sprint_id', params.sprintId);
 
       if (messages && messages.length > 0) {
         // Find the root message (where thread_root_id equals id)
@@ -69,14 +235,19 @@ export default function SprintCameraPage() {
         }
       }
 
-      // Navigate back to sprints tab after capture
-      router.replace({
-        pathname: '/(tabs)/sprints',
-        params: { viewSprint: sprintId }
-      });
+      // Navigate back to sprints tab
+      router.replace('/(tabs)/sprints');
     } catch (error) {
       console.error('Error handling sprint photo:', error);
       Alert.alert('Error', 'Failed to save sprint photo. Please try again.');
+    }
+  };
+
+  const handleCapture = async (photoUrl: string) => {
+    if (params.isNewSprint === 'true') {
+      await createNewSprint(photoUrl);
+    } else {
+      await updateExistingSprint(photoUrl);
     }
   };
 

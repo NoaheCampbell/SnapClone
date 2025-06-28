@@ -3,95 +3,21 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingVi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { supabase } from '../../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
-
-// Function to generate quiz for sprint
-const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // Generate AI summary with RAG using edge function
-    const summaryResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateSummaryWithRAG`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({
-        sprintId,
-        topic,
-        goals,
-        tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
-      })
-    });
-
-    let summary;
-    if (summaryResponse.ok) {
-      const summaryResult = await summaryResponse.json();
-      summary = summaryResult.summary;
-    } else {
-      // Fallback to simple summary
-      const { data: newSummary } = await supabase
-        .from('summaries')
-        .insert({
-          sprint_id: sprintId,
-          bullets: [`Study topic: ${topic}`, `Goals: ${goals}`],
-          tags: topic.toLowerCase().split(/\s+/).filter(word => word.length > 2)
-        })
-        .select()
-        .single();
-      summary = newSummary;
-    }
-
-    if (!summary) return;
-
-    // Generate gap-aware quiz using RAG edge function
-    const gapAwareQuizResponse = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generateGapAwareQuiz`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({
-        sprintId,
-        topic,
-        goals,
-        tags: summary.tags || [],
-        questionCount,
-        userId: user.id
-      })
-    });
-
-    if (gapAwareQuizResponse.ok) {
-      const gapAwareResult = await gapAwareQuizResponse.json();
-      const quizContent = gapAwareResult.quiz;
-      
-      if (quizContent) {
-        await supabase
-          .from('quizzes')
-          .insert({
-            summary_id: summary.id,
-            mcq_json: quizContent
-          });
-      }
-    }
-  } catch (error) {
-    console.error('Error generating quiz for sprint:', error);
-  }
-};
 
 export default function CreateSprintPage() {
   const router = useRouter();
-  const { circleId } = useLocalSearchParams<{ circleId: string }>();
-  const { user } = useAuth();
+  const params = useLocalSearchParams<{ 
+    circleId: string;
+    prefillTopic?: string;
+    prefillGoals?: string;
+    prefillDuration?: string;
+    prefillQuestionCount?: string;
+  }>();
   
-  const [topic, setTopic] = useState('');
-  const [goals, setGoals] = useState(['']);
-  const [duration, setDuration] = useState('25');
-  const [questionCount, setQuestionCount] = useState('3');
-  const [creating, setCreating] = useState(false);
+  const [topic, setTopic] = useState(params.prefillTopic || '');
+  const [goals, setGoals] = useState(params.prefillGoals ? params.prefillGoals.split(', ').filter(g => g) : ['']);
+  const [duration, setDuration] = useState(params.prefillDuration || '25');
+  const [questionCount, setQuestionCount] = useState(params.prefillQuestionCount || '3');
 
   const addGoal = () => {
     if (goals.length < 5) {
@@ -123,76 +49,18 @@ export default function CreateSprintPage() {
       return;
     }
 
-    setCreating(true);
-
-    try {
-      const durationMinutes = parseInt(duration);
-      const endsAt = new Date();
-      endsAt.setMinutes(endsAt.getMinutes() + durationMinutes);
-
-      const { data: sprint, error } = await supabase
-        .from('sprints')
-        .insert({
-          circle_id: circleId,
-          user_id: user?.id,
-          topic: topic.trim(),
-          goals: filteredGoals.join(', '),
-          quiz_question_count: parseInt(questionCount),
-          ends_at: endsAt.toISOString(),
-          tags: []
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Add creator as participant
-      await supabase
-        .from('sprint_participants')
-        .upsert({ sprint_id: sprint.id, user_id: user?.id }, { onConflict: 'sprint_id,user_id', ignoreDuplicates: true });
-
-      // Create sprint announcement message in the circle
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('user_id', user?.id)
-        .single();
-
-      const username = profile?.username || 'Someone';
-      
-      // Create the initial sprint message (which will be the thread root)
-      const { data: newMessage, error: messageError } = await supabase
-        .from('messages')
-        .insert({
-          circle_id: circleId,
-          sender_id: user?.id,
-          sprint_id: sprint.id,
-          content: `🏃‍♀️ ${username} started a ${durationMinutes}-minute sprint: "${topic.trim()}"`,
-          join_count: 1
-        })
-        .select()
-        .single();
-
-      if (messageError) {
-        console.error('Error sending sprint notification:', messageError);
-      } else if (newMessage) {
-        // Set thread_root_id to itself to mark it as a root message
-        await supabase
-          .from('messages')
-          .update({ thread_root_id: newMessage.id })
-          .eq('id', newMessage.id);
+    // Navigate to camera with all sprint data
+    router.replace({
+      pathname: '/(pages)/sprint-camera',
+      params: {
+        circleId: params.circleId,
+        topic: topic.trim(),
+        goals: filteredGoals.join(', '),
+        duration: duration,
+        questionCount: questionCount,
+        isNewSprint: 'true'
       }
-
-      // Generate quiz for the sprint
-      await generateQuizForSprint(sprint.id, topic, filteredGoals.join(', '), parseInt(questionCount));
-
-      // Navigate to sprint camera
-      router.replace(`/(pages)/sprint-camera?sprintId=${sprint.id}&isNewSprint=true`);
-    } catch (error) {
-      console.error('Error creating sprint:', error);
-      Alert.alert('Error', 'Failed to create sprint');
-      setCreating(false);
-    }
+    });
   };
 
   return (
@@ -312,13 +180,13 @@ export default function CreateSprintPage() {
           {/* Create Button */}
           <TouchableOpacity
             onPress={handleCreateSprint}
-            disabled={!topic.trim() || creating}
+            disabled={!topic.trim()}
             className={`py-4 rounded-xl items-center ${
-              topic.trim() && !creating ? 'bg-blue-600' : 'bg-gray-800'
+              topic.trim() ? 'bg-blue-600' : 'bg-gray-800'
             }`}
           >
             <Text className="text-white font-semibold text-lg">
-              {creating ? 'Creating...' : 'Start Sprint'}
+              Start Sprint
             </Text>
           </TouchableOpacity>
         </ScrollView>
