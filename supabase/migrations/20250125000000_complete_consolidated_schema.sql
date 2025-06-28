@@ -1,6 +1,14 @@
 -- Complete Consolidated Schema for SnapClone
 -- This single migration file creates the entire database structure
 -- Based on current production schema as of January 2025
+--
+-- IMPORTANT: After running this migration, you need to:
+-- 1. Update the vault secrets with your actual values:
+--    - Run: SELECT vault.update_secret('https://YOUR-PROJECT-REF.supabase.co', 'project_url');
+--    - Run: SELECT vault.update_secret('YOUR-SERVICE-ROLE-KEY', 'service_role_key');
+-- 2. Verify the setup with: SELECT * FROM check_vault_secrets();
+--
+-- For local development: Use http://localhost:54321 as the project_url
 
 BEGIN;
 
@@ -47,6 +55,8 @@ DROP FUNCTION IF EXISTS get_chat_messages(uuid) CASCADE;
 DROP FUNCTION IF EXISTS get_circle_details(uuid) CASCADE;
 DROP FUNCTION IF EXISTS get_user_circles() CASCADE;
 DROP FUNCTION IF EXISTS create_circle_invite(uuid, timestamptz, integer) CASCADE;
+DROP FUNCTION IF EXISTS check_vault_secrets() CASCADE;
+DROP FUNCTION IF EXISTS notify_circle_message_push() CASCADE;
 
 ------------------------------------------------------------
 -- 3. Core user profiles table
@@ -511,6 +521,7 @@ $$;
 -- Removed legacy get_chat_messages function - all chats are now circles
 
 -- Function to get user's circles with last message info
+DROP FUNCTION IF EXISTS get_user_circles();
 CREATE OR REPLACE FUNCTION get_user_circles()
 RETURNS TABLE (
     id uuid,
@@ -574,7 +585,7 @@ BEGIN
         lm.last_message_media
     FROM circle_basics cb
     LEFT JOIN last_messages lm ON lm.circle_id = cb.id
-    ORDER BY COALESCE(lm.last_message_at, cb.id::timestamptz) DESC;
+    ORDER BY lm.last_message_at DESC NULLS LAST;
 END;
 $$;
 
@@ -795,6 +806,83 @@ $$;
 
 -- Removed legacy get_chat_details function - all chats are now circles
 
+-- Function to check vault secrets configuration
+CREATE OR REPLACE FUNCTION check_vault_secrets()
+RETURNS TABLE (
+  secret_name text,
+  is_configured boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    s.name::text,
+    (s.decrypted_secret != 'https://YOUR-PROJECT-REF.supabase.co' 
+     AND s.decrypted_secret != 'YOUR-SERVICE-ROLE-KEY')::boolean
+  FROM vault.decrypted_secrets s
+  WHERE s.name IN ('project_url', 'service_role_key');
+END;
+$$;
+
+-- Function to send push notifications for circle messages
+CREATE OR REPLACE FUNCTION notify_circle_message_push()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+declare
+  tokens text[];
+  token text;
+  sender_name text;
+  msg_body text;
+begin
+  -- Gather recipient tokens, skipping sender and muted members
+  select array_agg(p.expo_push_token)
+    into tokens
+  from circle_members cm
+  join profiles p on p.user_id = cm.user_id
+  where cm.circle_id = new.circle_id
+    and cm.user_id <> new.sender_id
+    and coalesce(cm.mute_notifications,false) = false
+    and p.expo_push_token is not null;
+
+  if tokens is null then
+    return new;
+  end if;
+
+  select username into sender_name from profiles where user_id = new.sender_id;
+  if sender_name is null then sender_name := 'Someone'; end if;
+
+  if new.content is null or new.content = '' then
+    msg_body := 'Sent a photo';
+  elsif length(new.content) > 100 then
+    msg_body := substr(new.content, 1, 97) || '…';
+  else
+    msg_body := new.content;
+  end if;
+
+  foreach token in array tokens loop
+    -- Use the correct net.http_post signature
+    perform net.http_post(
+      url := 'https://exp.host/--/api/v2/push/send',
+      body := jsonb_build_object(
+        'to', token,
+        'sound', 'default',
+        'title', sender_name || ' in your circle',
+        'body', msg_body
+      ),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Accept', 'application/json'
+      )
+    );
+  end loop;
+  return new;
+end;
+$$;
+
 ------------------------------------------------------------
 -- 13. Triggers
 ------------------------------------------------------------
@@ -804,6 +892,12 @@ CREATE TRIGGER trigger_delete_message_media
   AFTER DELETE ON messages
   FOR EACH ROW
   EXECUTE FUNCTION delete_message_media_on_delete();
+
+-- Trigger for push notifications
+CREATE TRIGGER message_notifications
+  AFTER INSERT ON messages
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_circle_message_push();
 
 ------------------------------------------------------------
 -- 14. Permissions
@@ -824,9 +918,21 @@ GRANT EXECUTE ON FUNCTION get_circle_details(uuid) TO authenticated, anon;
 GRANT EXECUTE ON FUNCTION get_circle_invites(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION revoke_circle_invite(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION join_circle_by_invite(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION check_vault_secrets() TO authenticated;
 
 ------------------------------------------------------------
--- 15. Cron Jobs
+-- 15. Vault Setup (for secure storage of project secrets)
+------------------------------------------------------------
+
+-- Store project configuration in vault
+-- IMPORTANT: Update these values with your actual project details!
+-- For local development, use: http://localhost:54321
+-- For production, use: https://YOUR-PROJECT-REF.supabase.co
+SELECT vault.create_secret('https://YOUR-PROJECT-REF.supabase.co', 'project_url', 'Supabase project URL');
+SELECT vault.create_secret('YOUR-SERVICE-ROLE-KEY', 'service_role_key', 'Supabase service role key');
+
+------------------------------------------------------------
+-- 16. Cron Jobs
 ------------------------------------------------------------
 
 -- Delete expired messages and process media cleanup every minute
@@ -859,10 +965,10 @@ SELECT cron.schedule(
   '5 2 * * *',
   $$
   SELECT net.http_post(
-    url := current_setting('app.supabase_url') || '/functions/v1/updateStreaksDaily',
+    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'project_url') || '/functions/v1/updateStreaksDaily',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || current_setting('app.supabase_service_role_key')
+      'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key')
     ),
     body := '{}'::jsonb
   );
@@ -875,10 +981,10 @@ SELECT cron.schedule(
   '0 18 * * *',
   $$
   SELECT net.http_post(
-    url := current_setting('app.supabase_url') || '/functions/v1/sendStreakReminders',
+    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'project_url') || '/functions/v1/sendStreakReminders',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || current_setting('app.supabase_service_role_key')
+      'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'service_role_key')
     ),
     body := jsonb_build_object('now_iso', now()::text)
   );
@@ -886,13 +992,28 @@ SELECT cron.schedule(
 );
 
 ------------------------------------------------------------
--- 16. Enable Realtime
+-- 17. Enable Realtime
 ------------------------------------------------------------
+-- Enable realtime for all main tables to simplify development
+ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
+ALTER PUBLICATION supabase_realtime ADD TABLE friends;
+ALTER PUBLICATION supabase_realtime ADD TABLE friend_requests;
+ALTER PUBLICATION supabase_realtime ADD TABLE circles;
+ALTER PUBLICATION supabase_realtime ADD TABLE circle_members;
+ALTER PUBLICATION supabase_realtime ADD TABLE circle_invites;
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE message_reads;
 ALTER PUBLICATION supabase_realtime ADD TABLE message_reactions;
+ALTER PUBLICATION supabase_realtime ADD TABLE sprints;
+ALTER PUBLICATION supabase_realtime ADD TABLE sprint_participants;
+ALTER PUBLICATION supabase_realtime ADD TABLE summaries;
+ALTER PUBLICATION supabase_realtime ADD TABLE quizzes;
+ALTER PUBLICATION supabase_realtime ADD TABLE quiz_attempts;
+ALTER PUBLICATION supabase_realtime ADD TABLE streaks;
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 
 ------------------------------------------------------------
--- 17. Row Level Security (RLS)
+-- 18. Row Level Security (RLS)
 ------------------------------------------------------------
 -- RLS is disabled per PRD requirements for simplicity
 
