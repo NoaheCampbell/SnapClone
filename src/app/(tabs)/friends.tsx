@@ -1,6 +1,6 @@
 import { View, Text, FlatList, TouchableOpacity, Alert, Image, TextInput, ScrollView, Dimensions } from 'react-native'
 import GifLoadingIndicator from '../../components/GifLoadingIndicator'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { useAuth } from '../../contexts/AuthContext'
@@ -59,7 +59,18 @@ interface CircleInvitation {
 
 export default function FriendsScreen() {
   const { user } = useAuth()
-  const { checkAndStartTutorial, progress, completeTutorial, currentTutorial, hasQueuedTutorial, isShowingTutorial, nextStep, currentStep, tutorialSteps } = useTutorial()
+  const { 
+    checkAndStartTutorial, 
+    progress, 
+    isShowingTutorial, 
+    currentTutorial, 
+    currentStep, 
+    nextStep, 
+    completeTutorial, 
+    hasQueuedTutorial,
+    tutorialSteps,
+    updateStepTargetElement
+  } = useTutorial()
   const router = useRouter()
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
@@ -76,7 +87,7 @@ export default function FriendsScreen() {
   const [elementPositions, setElementPositions] = useState<Record<string, any>>({})
   
   // Ref to track if we've already attempted to start the tutorial
-  const hasAttemptedTutorialStart = React.useRef(false)
+  const hasAttemptedTutorialStart = useRef(false)
   
   // Debug log when hasSeenCircleChat changes
   React.useEffect(() => {
@@ -141,9 +152,12 @@ export default function FriendsScreen() {
         setTimeout(() => {
           refreshButtonElement.measure();
           
-          // Check if the position was captured
+          // Check if the position was captured and update the tutorial step
           setTimeout(() => {
-            if (!elementPositions['friends-4']) {
+            if (elementPositions['friends-4']) {
+              // Update the tutorial step with the measured position
+              updateStepTargetElement('friends-4', elementPositions['friends-4']);
+            } else {
               // Force another measurement
               refreshButtonElement.measure();
             }
@@ -151,7 +165,7 @@ export default function FriendsScreen() {
         }, 300);
       }
     }
-  }, [currentStep, currentTutorial, activeTab, isShowingTutorial, circleSuggestions.length]);
+  }, [currentStep, currentTutorial, activeTab, isShowingTutorial, circleSuggestions.length, elementPositions, updateStepTargetElement]);
 
   // Check if circle chat was just completed (within last 2 minutes)
   useEffect(() => {
@@ -231,6 +245,12 @@ export default function FriendsScreen() {
                   setActiveTab('circles');
                   nextStep();
                 };
+              }
+              
+              // For refresh button, provide a placeholder if position not available yet
+              if (step.id === 'friends-4' && !elementPositions[step.id]) {
+                console.log('[Friends Tutorial] Refresh button position not available yet');
+                // The position will be updated when we switch to circles tab
               }
               
               return baseStep;
@@ -320,6 +340,12 @@ export default function FriendsScreen() {
           if ((currentStep === 2 || currentStep === 3) && activeTab === 'circles') { // Step 3 or 4
             setTimeout(() => {
               refreshButtonElement.measure();
+              // Update the tutorial step with the refresh button position if available
+              setTimeout(() => {
+                if (elementPositions['friends-4']) {
+                  updateStepTargetElement('friends-4', elementPositions['friends-4']);
+                }
+              }, 100);
             }, 100);
           }
         }
@@ -328,7 +354,7 @@ export default function FriendsScreen() {
     
     // Update previous tab
     setPrevActiveTab(activeTab);
-  }, [activeTab, circleSuggestions.length, currentTutorial, isShowingTutorial, currentStep, prevActiveTab]);
+  }, [activeTab, circleSuggestions.length, currentTutorial, isShowingTutorial, currentStep, prevActiveTab, elementPositions, updateStepTargetElement]);
 
   // Also check when screen comes into focus (when user navigates here from chat tutorial)
   useFocusEffect(

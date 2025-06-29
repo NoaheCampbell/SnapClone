@@ -36,6 +36,7 @@ interface TutorialContextType {
   queueNextTutorial: (tutorialId: string) => void;
   checkAndStartNextQueuedTutorial: () => void;
   hasQueuedTutorial: (tutorialId: string) => boolean;
+  updateStepTargetElement: (stepId: string, targetElement: any) => void;
 }
 
 const TUTORIAL_STORAGE_KEY_PREFIX = '@sprintloop_tutorial_progress_';
@@ -278,6 +279,22 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     setProgress(defaultProgress);
   };
 
+  const updateStepTargetElement = (stepId: string, targetElement: any) => {
+    if (!isShowingTutorial || !currentTutorial) return;
+    
+    // Find the step with the given id and update its targetElement
+    const updatedSteps = tutorialSteps.map(step => 
+      step.id === stepId ? { ...step, targetElement } : step
+    );
+    
+    // Only update if something changed
+    const stepToUpdate = tutorialSteps.find(s => s.id === stepId);
+    if (stepToUpdate && (!stepToUpdate.targetElement || stepToUpdate.targetElement !== targetElement)) {
+      console.log(`[Tutorial Context] Updated targetElement for step ${stepId}`);
+      setTutorialSteps(updatedSteps);
+    }
+  };
+
   return (
     <TutorialContext.Provider
       value={{
@@ -297,6 +314,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
         queueNextTutorial,
         checkAndStartNextQueuedTutorial,
         hasQueuedTutorial,
+        updateStepTargetElement,
       }}
     >
       {children}
