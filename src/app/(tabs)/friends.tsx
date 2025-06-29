@@ -116,8 +116,19 @@ export default function FriendsScreen() {
   // Tutorial element registration callback
   const handleElementMeasure = useCallback((stepId: string, position: any) => {
     setElementPositions(prev => {
-      // Only update if the position actually changed
       const existingPos = prev[stepId];
+      
+      // If tutorial is already showing and we have a position, only update if the change is small
+      if (isShowingTutorial && existingPos) {
+        const yDiff = Math.abs(position.y - existingPos.y);
+        // If position changed by more than 50 pixels while tutorial is showing, ignore it
+        // This prevents layout shifts from disrupting the tutorial
+        if (yDiff > 50) {
+          return prev;
+        }
+      }
+      
+      // Only update if the position actually changed
       if (!existingPos || 
           existingPos.x !== position.x || 
           existingPos.y !== position.y || 
@@ -128,7 +139,7 @@ export default function FriendsScreen() {
       }
       return prev;
     });
-  }, []);
+  }, [isShowingTutorial]);
 
   // Tutorial element refs
   const searchAreaElement = useTutorialElement('friends-1', handleElementMeasure, []);
@@ -1011,7 +1022,19 @@ export default function FriendsScreen() {
   )
 
   return (
-    <SafeAreaView className="flex-1 bg-black">
+    <SafeAreaView className="flex-1 bg-black" onLayout={() => {
+      // Re-measure elements after SafeAreaView layout is complete
+      if (isShowingTutorial && currentTutorial === 'friendsDiscovery') {
+        setTimeout(() => {
+          searchAreaElement.measure();
+          discoverCirclesTabElement.measure();
+          sprintsTabElement.measure();
+          if (activeTab === 'circles') {
+            refreshButtonElement.measure();
+          }
+        }, 100);
+      }
+    }}>
       {/* Header */}
       <View className="px-6 py-4 flex-row items-center justify-between">
         <View>
@@ -1040,14 +1063,13 @@ export default function FriendsScreen() {
             </View>
           )}
           {activeTab === 'friends' && (
-            <View ref={searchAreaElement.ref} collapsable={false}>
-              <TouchableOpacity 
-                onPress={() => router.push('/(pages)/search-friends' as any)}
-                className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
-              >
-                <Feather name="search" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity 
+              ref={searchAreaElement.ref}
+              onPress={() => router.push('/(pages)/search-friends' as any)}
+              className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center"
+            >
+              <Feather name="search" size={20} color="white" />
+            </TouchableOpacity>
           )}
           {activeTab === 'circles' && (
             <View ref={refreshButtonElement.ref} collapsable={false}>
@@ -1082,22 +1104,21 @@ export default function FriendsScreen() {
               Friends
             </Text>
           </TouchableOpacity>
-          <View ref={discoverCirclesTabElement.ref} className="flex-1" collapsable={false}>
-            <TouchableOpacity
-              onPress={() => {
-                setActiveTab('circles');
-              }}
-              className={`flex-1 py-3 px-4 rounded-lg ${
-                activeTab === 'circles' ? 'bg-purple-500' : 'bg-transparent'
-              }`}
-            >
-              <Text className={`text-center font-semibold ${
-                activeTab === 'circles' ? 'text-white' : 'text-gray-400'
-              }`}>
-                Discover Circles
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            ref={discoverCirclesTabElement.ref}
+            onPress={() => {
+              setActiveTab('circles');
+            }}
+            className={`flex-1 py-3 px-4 rounded-lg ${
+              activeTab === 'circles' ? 'bg-purple-500' : 'bg-transparent'
+            }`}
+          >
+            <Text className={`text-center font-semibold ${
+              activeTab === 'circles' ? 'text-white' : 'text-gray-400'
+            }`}>
+              Discover Circles
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 

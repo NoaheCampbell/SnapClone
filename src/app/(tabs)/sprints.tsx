@@ -1017,8 +1017,8 @@ export default function SprintsTab() {
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
           <Text className="text-gray-400 text-sm">Focus together with your circles</Text>
-          <View className="flex-row items-center mt-1 self-start" ref={streakElement.ref} collapsable={false}>
-            <View className="flex-row items-center mr-4">
+          <View className="flex-row items-center mt-1 self-start">
+            <View className="flex-row items-center mr-4" ref={streakElement.ref} collapsable={false}>
               <Feather name="zap" size={16} color="#FBBF24" />
               <Text className="text-yellow-400 text-sm ml-1">{userStreak.current_len} day streak</Text>
             </View>

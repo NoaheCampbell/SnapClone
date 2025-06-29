@@ -140,8 +140,8 @@ export default function TutorialOverlay({
     const { x, y, width, height } = currentTutorialStep.targetElement;
     const tooltipPosition = currentTutorialStep.tooltipPosition || 'bottom';
     
-    // Add safe area insets back since we subtracted them during measurement
-    const adjustedY = y + insets.top;
+    // Use raw coordinates since useTutorialElement now provides absolute screen positions
+    const adjustedY = y;
 
     // Calculate center points of target element
     const targetCenterX = x + width / 2;
@@ -207,8 +207,8 @@ export default function TutorialOverlay({
     const tooltipPosition = currentTutorialStep.tooltipPosition || 'bottom';
     const tooltipPos = getTooltipPosition();
     
-    // Add safe area insets back since we subtracted them during measurement
-    const adjustedY = y + insets.top;
+    // Use raw coordinates since useTutorialElement now provides absolute screen positions
+    const adjustedY = y;
     
     // Calculate center of target element
     const targetCenterX = x + width / 2;
@@ -286,8 +286,8 @@ export default function TutorialOverlay({
     const { x, y, width, height } = currentTutorialStep.targetElement;
     const highlightColor = currentTutorialStep.highlightColor || '#3B82F6';
     
-    // Add safe area insets back since we subtracted them during measurement
-    const adjustedY = y + insets.top;
+    // Use raw coordinates since useTutorialElement now provides absolute screen positions
+    const adjustedY = y;
 
     return (
       <>
@@ -367,8 +367,8 @@ export default function TutorialOverlay({
     }
 
     const { x, y, width, height } = currentTutorialStep.targetElement;
-    // Add safe area insets back since we subtracted them during measurement
-    const adjustedY = y + insets.top;
+    // Use raw coordinates since useTutorialElement now provides absolute screen positions
+    const adjustedY = y;
 
     return (
       <>
