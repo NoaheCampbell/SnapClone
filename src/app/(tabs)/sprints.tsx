@@ -46,7 +46,7 @@ interface Circle {
 
 export default function SprintsTab() {
   const { user } = useAuth();
-  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials, nextStep, currentTutorial, currentStep } = useTutorial();
+  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials, nextStep, currentTutorial, currentStep, completeTutorial } = useTutorial();
   const [recentSprints, setRecentSprints] = useState<Sprint[]>([]);
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,6 +93,32 @@ export default function SprintsTab() {
 
     return () => clearTimeout(timer);
   }, [userStreak.current_len, myCircles.length]);
+
+  // Complete friends tutorial when arriving at sprints screen
+  useFocusEffect(
+    React.useCallback(() => {
+      // Check if user arrived here during friends tutorial final step
+      if (isShowingTutorial && currentTutorial === 'friendsDiscovery' && currentStep >= 4) {
+        console.log('[Sprints] User navigated here during friends tutorial final step, completing...');
+        // Complete the friends tutorial
+        setTimeout(() => {
+          completeTutorial();
+        }, 500);
+      }
+    }, [isShowingTutorial, currentTutorial, currentStep, completeTutorial])
+  );
+
+  // Detect tab changes during sprint tabs tutorial
+  useEffect(() => {
+    // Check if we're in the sprint tabs tutorial and on the step that asks to tap Recent Sprints
+    if (currentTutorial === 'sprintTabs' && isShowingTutorial && currentStep === 2 && activeTab === 'history') {
+      console.log('[Sprint Tabs Tutorial] User switched to history tab, advancing tutorial...');
+      // Advance to the next step
+      setTimeout(() => {
+        nextStep();
+      }, 300);
+    }
+  }, [currentTutorial, isShowingTutorial, currentStep, activeTab, nextStep]);
 
   // Start sprint tabs tutorial when returning from friends tutorial
   useEffect(() => {
