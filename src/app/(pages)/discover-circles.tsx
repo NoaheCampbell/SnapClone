@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import { supabase } from '../../../lib/supabase';
 
 interface PublicCircle {
@@ -255,14 +256,21 @@ export default function DiscoverCirclesScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                tintColor="white"
+                tintColor="#10B981"
+                colors={['#10B981', '#34D399', '#6EE7B7']}
+                progressBackgroundColor="#1F2937"
+                title="Pull to refresh circles"
+                titleColor="#9CA3AF"
               />
             }
           />
         ) : (
           <View className="flex-1 justify-center items-center p-8">
             {loading ? (
-              <Text className="text-white">Loading circles...</Text>
+              <View className="items-center">
+                <GifLoadingIndicator size="large" color="white" />
+                <Text className="text-white mt-4">Loading circles...</Text>
+              </View>
             ) : searchQuery ? (
               <>
                 <Feather name="search" size={64} color="gray" />

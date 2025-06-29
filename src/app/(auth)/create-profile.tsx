@@ -1,4 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native'
+import GifLoadingIndicator from '../../components/GifLoadingIndicator'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -64,7 +65,7 @@ export default function CreateProfileScreen() {
   if (authLoading) {
     return (
       <SafeAreaView className="flex-1 bg-black justify-center items-center">
-        <ActivityIndicator size="large" color="#ffffff" />
+                      <GifLoadingIndicator size="large" color="#ffffff" />
         <Text className="text-white mt-4">Loading...</Text>
       </SafeAreaView>
     );

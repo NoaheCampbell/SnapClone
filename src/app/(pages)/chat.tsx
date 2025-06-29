@@ -1,4 +1,5 @@
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, TouchableWithoutFeedback, ActivityIndicator } from 'react-native'
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Image, TouchableWithoutFeedback } from 'react-native'
+import GifLoadingIndicator from '../../components/GifLoadingIndicator'
 import React, { useState, useEffect, useRef, memo, useCallback } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -1633,7 +1634,8 @@ export default function ChatScreen() {
     return (
       <SafeAreaView className="flex-1 bg-black">
         <View className="flex-1 justify-center items-center">
-          <Text className="text-white">Loading chat...</Text>
+          <GifLoadingIndicator size="large" color="white" />
+          <Text className="text-white mt-4">Loading chat...</Text>
         </View>
       </SafeAreaView>
     )

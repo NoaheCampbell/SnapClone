@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, Image } from 'react-native';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -237,7 +238,7 @@ export default function SendToPage() {
         <View className="flex-1">
           {loading ? (
             <View className="flex-1 justify-center items-center">
-              <ActivityIndicator size="large" color="#fff" />
+              <GifLoadingIndicator size="large" color="#fff" />
             </View>
           ) : (
             <FlatList

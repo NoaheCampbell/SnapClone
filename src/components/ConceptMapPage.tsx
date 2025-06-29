@@ -5,12 +5,13 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ScrollView,
-  ActivityIndicator,
+
   Alert,
   Dimensions
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import GifLoadingIndicator from './GifLoadingIndicator';
 import { WebView } from 'react-native-webview';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useRouter } from 'expo-router';
@@ -245,7 +246,7 @@ export default function ConceptMapPage({
 
         {loading ? (
           <View className="flex-1 justify-center items-center">
-            <ActivityIndicator size="large" color="#3B82F6" />
+            <GifLoadingIndicator size="large" color="#3B82F6" />
             <Text className="text-gray-400 mt-2">Loading concept map...</Text>
           </View>
         ) : conceptMapData ? (
@@ -317,16 +318,19 @@ export default function ConceptMapPage({
               Generate a visual concept map that connects this topic to your previous studies
             </Text>
             
+            {generating && (
+              <View className="items-center mb-4">
+                <GifLoadingIndicator size="large" color="#3B82F6" />
+                <Text className="text-blue-400 text-sm mt-2">Generating your concept map...</Text>
+              </View>
+            )}
+            
             <TouchableOpacity 
               onPress={generateConceptMap}
               disabled={generating}
-              className="bg-blue-600 rounded-lg px-6 py-3 flex-row items-center"
+              className={`${generating ? 'bg-gray-600' : 'bg-blue-600'} rounded-lg px-6 py-3 flex-row items-center`}
             >
-              {generating ? (
-                <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-              ) : (
-                <Feather name="map" size={16} color="white" style={{ marginRight: 8 }} />
-              )}
+              <Feather name="map" size={16} color="white" style={{ marginRight: 8 }} />
               <Text className="text-white font-medium">
                 {generating ? 'Generating...' : 'Generate Concept Map'}
               </Text>

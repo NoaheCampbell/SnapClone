@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, Alert } from 'react-native';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -139,7 +140,7 @@ export default function SearchFriendsPage() {
       {/* Search Results */}
       {searching ? (
         <View className="flex-1 justify-center items-center">
-          <ActivityIndicator size="large" color="white" />
+                      <GifLoadingIndicator size="large" color="white" />
         </View>
       ) : (
         <FlatList

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, ActivityIndicator, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
+import { FlatList, Pressable, View, Text, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView, RefreshControl } from 'react-native';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
@@ -808,7 +809,7 @@ export default function SprintsTab() {
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black justify-center items-center" edges={['top', 'left', 'right']}>
-        <ActivityIndicator size="large" color="white" />
+                      <GifLoadingIndicator size="large" color="white" />
       </SafeAreaView>
     );
   }
@@ -918,11 +919,20 @@ export default function SprintsTab() {
                 renderItem={renderSprint}
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
-                refreshing={refreshing}
-                onRefresh={() => {
-                  setRefreshing(true);
-                  loadData();
-                }}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={() => {
+                      setRefreshing(true);
+                      loadData();
+                    }}
+                    tintColor="#3B82F6"
+                    colors={['#3B82F6', '#60A5FA', '#93C5FD']}
+                    progressBackgroundColor="#1F2937"
+                    title="Pull to refresh sprints"
+                    titleColor="#9CA3AF"
+                  />
+                }
                 contentContainerStyle={{ paddingBottom: 20 }}
               />
             ) : (

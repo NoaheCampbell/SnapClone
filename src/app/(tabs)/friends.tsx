@@ -1,4 +1,5 @@
-import { View, Text, FlatList, TouchableOpacity, Alert, Image, TextInput, ActivityIndicator, ScrollView } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert, Image, TextInput, ScrollView } from 'react-native'
+import GifLoadingIndicator from '../../components/GifLoadingIndicator'
 import React, { useState, useEffect } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -760,7 +761,7 @@ export default function FriendsScreen() {
           // Circles Tab
           loadingCircleSuggestions ? (
             <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#A855F7" />
+              <GifLoadingIndicator size="large" color="#A855F7" />
               <Text className="text-white text-lg mt-4">Finding circles for you...</Text>
               <Text className="text-gray-400 text-sm mt-2 text-center px-8">
                 Using AI to match you with study groups based on your interests

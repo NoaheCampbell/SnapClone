@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -114,7 +115,7 @@ export default function QuizResultsScreen() {
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-black justify-center items-center">
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <GifLoadingIndicator size="large" color="#3B82F6" />
         <Text className="text-gray-400 mt-4">Loading results...</Text>
       </SafeAreaView>
     );

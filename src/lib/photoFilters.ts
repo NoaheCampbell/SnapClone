@@ -66,15 +66,6 @@ export const photoFilters: FilterConfig[] = [
       backgroundColor: '#C4A574',
       opacity: 0.3,
     }
-  },
-  { 
-    id: 'negative', 
-    name: 'Negative', 
-    icon: 'image',
-    overlayStyle: {
-      backgroundColor: 'rgba(255, 255, 255, 1)',
-      mixBlendMode: 'difference' as const,
-    }
   }
 ];
 

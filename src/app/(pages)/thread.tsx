@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
+import { View, Text, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -293,7 +294,7 @@ export default function ThreadPage() {
 
         {loadingThread ? (
           <View className="flex-1 justify-center items-center">
-            <ActivityIndicator size="large" color="white" />
+            <GifLoadingIndicator size="large" color="white" />
           </View>
         ) : (
           <>

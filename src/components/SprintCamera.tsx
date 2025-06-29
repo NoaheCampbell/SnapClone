@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, Alert, TextInput, Image, ScrollView, Modal, ActivityIndicator } from 'react-native'
+import { View, Text, TouchableOpacity, Alert, TextInput, Image, ScrollView, Modal } from 'react-native'
+import GifLoadingIndicator from './GifLoadingIndicator'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -878,7 +879,7 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
                   alignItems: 'center',
                 }}
               >
-                <ActivityIndicator size="large" color="white" />
+                <GifLoadingIndicator size="large" color="white" />
                 <Text style={{ color: 'white', marginTop: 16, fontSize: 16 }}>
                   Starting your sprint...
                 </Text>

@@ -1,4 +1,5 @@
 import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native'
+import GifLoadingIndicator from '../../components/GifLoadingIndicator'
 import React, { useState, useEffect, memo, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -422,7 +423,8 @@ export default function InboxScreen() {
     return (
       <SafeAreaView className="flex-1 bg-black">
         <View className="flex-1 justify-center items-center">
-          <Text className="text-white">Loading circles...</Text>
+          <GifLoadingIndicator size="large" color="white" />
+          <Text className="text-white mt-4">Loading circles...</Text>
         </View>
       </SafeAreaView>
     )
