@@ -1,0 +1,453 @@
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  Animated,
+  Dimensions,
+  StatusBar,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+export interface TutorialStep {
+  id: string;
+  title: string;
+  description: string;
+  targetElement?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  tooltipPosition?: 'top' | 'bottom' | 'left' | 'right' | 'center';
+  action?: () => void; // Optional action to perform when this step is shown
+  highlightColor?: string;
+}
+
+interface TutorialOverlayProps {
+  visible: boolean;
+  steps: TutorialStep[];
+  currentStep: number;
+  onNext: () => void;
+  onPrevious: () => void;
+  onSkip: () => void;
+  onComplete: () => void;
+}
+
+export default function TutorialOverlay({
+  visible,
+  steps,
+  currentStep,
+  onNext,
+  onPrevious,
+  onSkip,
+  onComplete,
+}: TutorialOverlayProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const pulseAnim = useRef(new Animated.Value(0.3)).current;
+  const pulseScaleAnim = useRef(new Animated.Value(1)).current;
+
+  const currentTutorialStep = steps[currentStep];
+  const isLastStep = currentStep === steps.length - 1;
+  const isFirstStep = currentStep === 0;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      // Start pulse animation for highlight
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.8,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 0.3,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseScaleAnim, {
+            toValue: 1.1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseScaleAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      // Execute step action if provided
+      if (currentTutorialStep?.action) {
+        setTimeout(() => {
+          currentTutorialStep.action!();
+        }, 100);
+      }
+    } else {
+      fadeAnim.setValue(0);
+      scaleAnim.setValue(0.8);
+      pulseAnim.setValue(0.3);
+      pulseScaleAnim.setValue(1);
+    }
+  }, [visible, currentStep]);
+
+  if (!visible || !currentTutorialStep) return null;
+
+  const getTooltipPosition = () => {
+    const tooltipMaxWidth = 280; // Maximum width for tooltip
+    const tooltipPadding = 16; // Padding from screen edges
+    const arrowSize = 12; // Space for arrow
+    
+    if (!currentTutorialStep.targetElement) {
+      return {
+        top: screenHeight / 2 - 100,
+        left: 20,
+        right: 20,
+      };
+    }
+
+    const { x, y, width, height } = currentTutorialStep.targetElement;
+    const tooltipPosition = currentTutorialStep.tooltipPosition || 'bottom';
+
+    // Calculate center points of target element
+    const targetCenterX = x + width / 2;
+    const targetCenterY = y + height / 2;
+
+    switch (tooltipPosition) {
+      case 'top':
+        // Position above the element
+        return {
+          bottom: screenHeight - y + arrowSize,
+          left: Math.max(
+            tooltipPadding, 
+            Math.min(
+              targetCenterX - tooltipMaxWidth / 2,
+              screenWidth - tooltipMaxWidth - tooltipPadding
+            )
+          ),
+          maxWidth: tooltipMaxWidth,
+        };
+      case 'bottom':
+        // Position below the element
+        return {
+          top: y + height + arrowSize,
+          left: Math.max(
+            tooltipPadding,
+            Math.min(
+              targetCenterX - tooltipMaxWidth / 2,
+              screenWidth - tooltipMaxWidth - tooltipPadding
+            )
+          ),
+          maxWidth: tooltipMaxWidth,
+        };
+      case 'left':
+        // Position to the left of element
+        return {
+          top: Math.max(tooltipPadding, targetCenterY - 50),
+          right: screenWidth - x + arrowSize,
+          maxWidth: Math.min(tooltipMaxWidth, x - arrowSize - tooltipPadding * 2),
+        };
+      case 'right':
+        // Position to the right of element
+        return {
+          top: Math.max(tooltipPadding, targetCenterY - 50),
+          left: x + width + arrowSize,
+          maxWidth: Math.min(tooltipMaxWidth, screenWidth - x - width - arrowSize - tooltipPadding * 2),
+        };
+      case 'center':
+      default:
+        return {
+          top: screenHeight / 2 - 100,
+          left: 20,
+          right: 20,
+        };
+    }
+  };
+
+  const renderHighlight = () => {
+    if (!currentTutorialStep.targetElement) return null;
+
+    const { x, y, width, height } = currentTutorialStep.targetElement;
+    const highlightColor = currentTutorialStep.highlightColor || '#3B82F6';
+
+    return (
+      <>
+        {/* Outer glow effect */}
+        <Animated.View
+          style={{
+            position: 'absolute',
+            left: x - 12,
+            top: y - 12,
+            width: width + 24,
+            height: height + 24,
+            borderRadius: 16,
+            backgroundColor: highlightColor,
+            opacity: pulseAnim.interpolate({
+              inputRange: [0.3, 0.8],
+              outputRange: [0.2, 0.4],
+            }),
+            transform: [{ scale: pulseScaleAnim }],
+          }}
+        />
+        
+        {/* Middle glow layer */}
+        <View
+          style={{
+            position: 'absolute',
+            left: x - 8,
+            top: y - 8,
+            width: width + 16,
+            height: height + 16,
+            borderRadius: 12,
+            backgroundColor: highlightColor,
+            opacity: 0.3,
+          }}
+        />
+        
+        {/* Inner border */}
+        <View
+          style={{
+            position: 'absolute',
+            left: x - 4,
+            top: y - 4,
+            width: width + 8,
+            height: height + 8,
+            borderRadius: 8,
+            borderWidth: 3,
+            borderColor: highlightColor,
+            backgroundColor: 'transparent',
+          }}
+        />
+        
+        {/* Pulsing border overlay */}
+        <Animated.View
+          style={{
+            position: 'absolute',
+            left: x - 4,
+            top: y - 4,
+            width: width + 8,
+            height: height + 8,
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: highlightColor,
+            backgroundColor: 'transparent',
+            opacity: pulseAnim,
+          }}
+        />
+      </>
+    );
+  };
+
+  const renderOverlay = () => {
+    if (!currentTutorialStep.targetElement) {
+      return <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />;
+    }
+
+    const { x, y, width, height } = currentTutorialStep.targetElement;
+
+    return (
+      <>
+        {/* Top overlay */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: y,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          }}
+        />
+        {/* Left overlay */}
+        <View
+          style={{
+            position: 'absolute',
+            top: y,
+            left: 0,
+            width: x,
+            height: height,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          }}
+        />
+        {/* Right overlay */}
+        <View
+          style={{
+            position: 'absolute',
+            top: y,
+            left: x + width,
+            right: 0,
+            height: height,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          }}
+        />
+        {/* Bottom overlay */}
+        <View
+          style={{
+            position: 'absolute',
+            top: y + height,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          }}
+        />
+      </>
+    );
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="none">
+      <StatusBar backgroundColor="rgba(0, 0, 0, 0.7)" barStyle="light-content" />
+      <View style={{ flex: 1 }}>
+        {renderOverlay()}
+        {renderHighlight()}
+        
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              ...getTooltipPosition(),
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
+            },
+          ]}
+        >
+          <View>
+            {/* Arrow pointing to target element */}
+            {currentTutorialStep.targetElement && currentTutorialStep.tooltipPosition !== 'center' && (
+              <View
+                style={{
+                  position: 'absolute',
+                  width: 0,
+                  height: 0,
+                  borderStyle: 'solid',
+                  ...(currentTutorialStep.tooltipPosition === 'bottom' && {
+                    top: -10,
+                    left: '50%',
+                    marginLeft: -10,
+                    borderLeftWidth: 10,
+                    borderRightWidth: 10,
+                    borderBottomWidth: 10,
+                    borderLeftColor: 'transparent',
+                    borderRightColor: 'transparent',
+                    borderBottomColor: 'white',
+                  }),
+                  ...(currentTutorialStep.tooltipPosition === 'top' && {
+                    bottom: -10,
+                    left: '50%',
+                    marginLeft: -10,
+                    borderLeftWidth: 10,
+                    borderRightWidth: 10,
+                    borderTopWidth: 10,
+                    borderLeftColor: 'transparent',
+                    borderRightColor: 'transparent',
+                    borderTopColor: 'white',
+                  }),
+                  ...(currentTutorialStep.tooltipPosition === 'right' && {
+                    left: -10,
+                    top: 30,
+                    borderTopWidth: 10,
+                    borderBottomWidth: 10,
+                    borderRightWidth: 10,
+                    borderTopColor: 'transparent',
+                    borderBottomColor: 'transparent',
+                    borderRightColor: 'white',
+                  }),
+                  ...(currentTutorialStep.tooltipPosition === 'left' && {
+                    right: -10,
+                    top: 30,
+                    borderTopWidth: 10,
+                    borderBottomWidth: 10,
+                    borderLeftWidth: 10,
+                    borderTopColor: 'transparent',
+                    borderBottomColor: 'transparent',
+                    borderLeftColor: 'white',
+                  }),
+                }}
+              />
+            )}
+            <View className="bg-white rounded-2xl p-4 shadow-lg" style={{ elevation: 5 }}>
+              {/* Progress indicator */}
+              <View className="flex-row justify-between items-center mb-2">
+                <View className="flex-row">
+                  {steps.map((_, index) => (
+                    <View
+                      key={index}
+                      className={`w-1.5 h-1.5 rounded-full mr-1 ${
+                        index === currentStep ? 'bg-blue-500' : 'bg-gray-300'
+                      }`}
+                    />
+                  ))}
+                </View>
+                <TouchableOpacity onPress={onSkip} className="p-1 -mr-1">
+                  <Text className="text-gray-500 text-xs">Skip</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Content */}
+              <View className="mb-3">
+                <Text className="text-base font-bold text-gray-900 mb-1">
+                  {currentTutorialStep.title}
+                </Text>
+                <Text className="text-sm text-gray-700 leading-5">
+                  {currentTutorialStep.description}
+                </Text>
+              </View>
+
+              {/* Navigation buttons */}
+              <View className="flex-row justify-between items-center">
+                <TouchableOpacity
+                  onPress={onPrevious}
+                  disabled={isFirstStep}
+                  className={`px-3 py-1.5 rounded-lg ${
+                    isFirstStep ? 'opacity-30' : ''
+                  }`}
+                >
+                  <Text className="text-blue-500 text-sm font-medium">Previous</Text>
+                </TouchableOpacity>
+
+                <Text className="text-gray-500 text-xs">
+                  {currentStep + 1} of {steps.length}
+                </Text>
+
+                <TouchableOpacity
+                  onPress={isLastStep ? onComplete : onNext}
+                  className="bg-blue-500 px-4 py-1.5 rounded-lg"
+                >
+                  <Text className="text-white text-sm font-medium">
+                    {isLastStep ? 'Done' : 'Next'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}

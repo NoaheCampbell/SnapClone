@@ -15,7 +15,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
     "@gorhom/bottom-sheet": "^4.6.4",
-    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/slider": "^4.5.7",
     "@supabase/supabase-js": "^2.50.0",
     "base64-arraybuffer": "^1.0.2",

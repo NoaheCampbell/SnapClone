@@ -26,7 +26,35 @@ export default function LoginScreen() {
       const { error } = await signIn(email.trim(), password)
 
       if (error) {
-        Alert.alert('Login Failed', error.message || 'Unknown error occurred')
+        // Check if it's an email verification error
+        if (error.message?.includes('email') && error.message?.includes('confirm')) {
+          Alert.alert(
+            'Email Not Verified', 
+            'For development: Go to Supabase Dashboard → Authentication → Users → Click on your user → Actions → Confirm email',
+            [
+              { text: 'OK' },
+              {
+                text: 'Try Admin Bypass',
+                onPress: async () => {
+                  // Development workaround - update the user directly if possible
+                  const { data: adminData, error: adminError } = await supabase.auth.admin.updateUserById(
+                    user?.id || '',
+                    { email_confirm: true }
+                  ).catch(() => ({ data: null, error: new Error('Admin API not available') }))
+                  
+                  if (!adminError) {
+                    // Retry login
+                    handleLogin()
+                  } else {
+                    Alert.alert('Admin Bypass Failed', 'Please confirm email manually in Supabase dashboard')
+                  }
+                }
+              }
+            ]
+          )
+        } else {
+          Alert.alert('Login Failed', error.message || 'Unknown error occurred')
+        }
       } else {
         // Small delay to ensure auth state updates
         setTimeout(() => {

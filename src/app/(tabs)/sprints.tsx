@@ -5,6 +5,9 @@ import CustomPullToRefresh from '../../components/CustomPullToRefresh';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTutorial } from '../../contexts/TutorialContext';
+import { welcomeTutorialSteps, tutorialCompletedStep } from '../../utils/tutorialSteps';
+import { useTutorialElement } from '../../hooks/useTutorialElement';
 import { supabase } from '../../../lib/supabase';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,6 +44,7 @@ interface Circle {
 
 export default function SprintsTab() {
   const { user } = useAuth();
+  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials } = useTutorial();
   const [recentSprints, setRecentSprints] = useState<Sprint[]>([]);
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,11 +54,66 @@ export default function SprintsTab() {
   const [endingSprintId, setEndingSprintId] = useState<string>('');
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
   const [activeTab, setActiveTab] = useState<'start' | 'history'>('start');
+  const [elementPositions, setElementPositions] = useState<Record<string, any>>({});
 
   const params = useLocalSearchParams<{
     viewSprint?: string;
     copyFrom?: string;
   }>();
+
+  // Tutorial element registration callback
+  const handleElementMeasure = useCallback((stepId: string, position: any) => {
+    setElementPositions(prev => ({ ...prev, [stepId]: position }));
+  }, []);
+
+  // Tutorial element refs
+  const streakElement = useTutorialElement('welcome-3', handleElementMeasure, [userStreak.current_len]);
+  const circleHeaderElement = useTutorialElement('welcome-4', handleElementMeasure, [myCircles.length]);
+  const tabBarElement = useTutorialElement('welcome-5', handleElementMeasure, []);
+
+  // Ensure elements are measured after render
+  useEffect(() => {
+    // Give the UI time to render before measuring
+    const timer = setTimeout(() => {
+      console.log('[Tutorial Debug] Manually triggering element measurements');
+      streakElement.measure();
+      circleHeaderElement.measure();
+      tabBarElement.measure();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [userStreak.current_len, myCircles.length]);
+
+  // Start welcome tutorial for new users
+  useEffect(() => {
+    console.log('[Tutorial Debug] Checking tutorial conditions:', {
+      loading,
+      hasUser: !!user,
+      hasSeenWelcome: progress.hasSeenWelcome,
+      circleCount: myCircles.length,
+      elementPositionsCount: Object.keys(elementPositions).length,
+      isShowingTutorial
+    });
+    
+    // Wait for elements to be measured
+    if (!loading && user && !progress.hasSeenWelcome && Object.keys(elementPositions).length >= 3) {
+      console.log('[Tutorial Debug] Tutorial conditions met, preparing steps...');
+      
+      // Update tutorial steps with measured positions
+      const stepsWithPositions = welcomeTutorialSteps.map(step => {
+        if (elementPositions[step.id]) {
+          return { ...step, targetElement: elementPositions[step.id] };
+        }
+        return step;
+      });
+
+      // Add the completion step at the end
+      const allSteps = [...stepsWithPositions, tutorialCompletedStep];
+      
+      console.log('[Tutorial Debug] Starting tutorial with steps:', allSteps.length);
+      checkAndStartTutorial('welcome', allSteps);
+    }
+  }, [loading, user, progress.hasSeenWelcome, myCircles.length, elementPositions]);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -824,8 +883,8 @@ export default function SprintsTab() {
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
           <Text className="text-gray-400 text-sm">Focus together with your circles</Text>
-          <View className="flex-row items-center mt-1 space-x-4">
-            <View className="flex-row items-center">
+          <View className="flex-row items-center mt-1 self-start" ref={streakElement.ref} collapsable={false}>
+            <View className="flex-row items-center mr-4">
               <Feather name="zap" size={16} color="#FBBF24" />
               <Text className="text-yellow-400 text-sm ml-1">{userStreak.current_len} day streak</Text>
             </View>
@@ -834,6 +893,48 @@ export default function SprintsTab() {
               <Text className="text-blue-300 text-sm ml-1">{userStreak.freeze_tokens} tokens</Text>
             </View>
           </View>
+          
+          {/* Debug Tutorial Buttons - Remove in production */}
+          {__DEV__ && (
+            <View className="flex-row mt-2 space-x-2">
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('[Tutorial Debug] Manual trigger pressed');
+                  console.log('[Tutorial Debug] Current element positions:', elementPositions);
+                  
+                  // Force measure elements again
+                  streakElement.measure();
+                  circleHeaderElement.measure();
+                  tabBarElement.measure();
+                  
+                  // Wait a bit for measurements
+                  setTimeout(() => {
+                    const stepsWithPositions = welcomeTutorialSteps.map(step => {
+                      if (elementPositions[step.id]) {
+                        return { ...step, targetElement: elementPositions[step.id] };
+                      }
+                      return step;
+                    });
+                    const allSteps = [...stepsWithPositions, tutorialCompletedStep];
+                    startTutorial('welcome', allSteps);
+                  }, 100);
+                }}
+                className="bg-purple-600 px-3 py-1 rounded-lg"
+              >
+                <Text className="text-white text-sm">Start Tutorial</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={async () => {
+                  console.log('[Tutorial Debug] Reset tutorial progress');
+                  await resetTutorials();
+                  Alert.alert('Debug', 'Tutorial progress reset. Reload screen to trigger tutorial.');
+                }}
+                className="bg-red-600 px-3 py-1 rounded-lg"
+              >
+                <Text className="text-white text-sm">Reset Tutorial</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Tab Navigation */}
@@ -870,7 +971,7 @@ export default function SprintsTab() {
         {activeTab === 'start' ? (
           /* Start Sprint Tab - My Circles */
           <View className="flex-1">
-            <View className="p-4 pb-2">
+            <View className="p-4 pb-2" ref={circleHeaderElement.ref} collapsable={false}>
               <Text className="text-white text-lg font-semibold">Choose a Circle</Text>
               <Text className="text-gray-400 text-sm mt-1">Select where you want to start your sprint</Text>
             </View>
@@ -965,6 +1066,32 @@ export default function SprintsTab() {
           />
         </View>
       )}
+      
+      {/* Tab Bar Reference - positioned at bottom */}
+      <View 
+        style={{ 
+          position: 'absolute', 
+          bottom: 0, 
+          left: 0, 
+          right: 0, 
+          height: 80,
+          flexDirection: 'row',
+          pointerEvents: 'none' 
+        }} 
+      >
+        {/* Friends tab position (first visible tab) */}
+        <View 
+          ref={tabBarElement.ref}
+          collapsable={false}
+          style={{ 
+            flex: 1,
+            height: 80,
+          }} 
+        />
+        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1 }} />
+      </View>
     </SafeAreaView>
     </GestureHandlerRootView>
   );

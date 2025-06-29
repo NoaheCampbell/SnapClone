@@ -174,8 +174,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!error && data.user) {
-      setSession(data.session);
-      setUser(data.user);
+      // Auto sign-in after signup to bypass email verification
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (!signInError && signInData.user) {
+        setSession(signInData.session);
+        setUser(signInData.user);
+      }
     }
     
     return { error }
