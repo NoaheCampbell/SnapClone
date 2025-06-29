@@ -28,15 +28,7 @@ export function useTutorialElement(
           // Adjust Y position to account for safe area and status bar
           const adjustedY = pageY - insets.top - statusBarHeight;
           
-          console.log(`[Tutorial Element] Measured ${stepId}:`, { 
-            pageX, 
-            pageY, 
-            adjustedY,
-            width, 
-            height,
-            insetsTop: insets.top,
-            statusBarHeight
-          });
+
           
           onMeasure(stepId, {
             x: pageX,

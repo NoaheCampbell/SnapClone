@@ -435,12 +435,8 @@ export default function TutorialOverlay({
               zIndex: 9999,
             }}
             onPress={() => {
-              console.log('[Tutorial Debug] Target area clicked!', { x, y: adjustedY, width, height });
               if (currentTutorialStep.onTargetPress) {
-                console.log('[Tutorial Debug] Calling onTargetPress...');
                 currentTutorialStep.onTargetPress();
-              } else {
-                console.log('[Tutorial Debug] No onTargetPress function found');
               }
             }}
             activeOpacity={0.7}

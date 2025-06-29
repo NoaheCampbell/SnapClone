@@ -200,13 +200,13 @@ export default function InboxScreen() {
           highlightColor: '#10B981',
           requiresInteraction: true,
           onTargetPress: async () => {
-            console.log('[Circles Tutorial] Friends tab clicked, completing tutorial...');
+    
             
             // Set completion timestamp before navigation
             try {
               await AsyncStorage.setItem('circleChat_completed_at', Date.now().toString());
             } catch (error) {
-              console.error('[Circles Tutorial] Error saving completion timestamp:', error);
+              // Error saving completion timestamp handled silently
             }
             
             // Complete the circles tutorial first
@@ -214,7 +214,7 @@ export default function InboxScreen() {
             
             // Then navigate to friends tab after a delay to ensure tutorial context updates
             setTimeout(() => {
-              console.log('[Circles Tutorial] Navigating to friends tab...');
+
               router.push('/(tabs)/friends');
             }, 300); // Increased delay to ensure context updates
           }

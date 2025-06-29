@@ -91,7 +91,7 @@ export default function FriendsScreen() {
   
   // Debug log when hasSeenCircleChat changes
   React.useEffect(() => {
-    console.log('[Friends Tutorial] hasSeenCircleChat changed to:', progress.hasSeenCircleChat);
+
   }, [progress.hasSeenCircleChat]);
   
   // Reset the flag when tutorial state changes or screen loses focus
@@ -123,7 +123,7 @@ export default function FriendsScreen() {
           existingPos.y !== position.y || 
           existingPos.width !== position.width || 
           existingPos.height !== position.height) {
-        console.log(`[Friends Tutorial] Element measured: ${stepId}`, position);
+    
         return { ...prev, [stepId]: position };
       }
       return prev;
@@ -183,9 +183,9 @@ export default function FriendsScreen() {
             setHasJustCompletedCircleChat(true);
           }
         }
-      } catch (error) {
-        console.error('[Friends Tutorial] Error checking completion timestamp:', error);
-      }
+              } catch (error) {
+          // Error checking completion timestamp handled silently
+        }
     };
     
     checkRecentCompletion();
@@ -203,12 +203,7 @@ export default function FriendsScreen() {
       );
       
       if (shouldStartFriends) {
-        console.log('[Friends Tutorial] Should start friends tutorial from useEffect, conditions:', {
-          currentTutorial,
-          hasSeenCircleChat: progress.hasSeenCircleChat,
-          hasJustCompleted: hasJustCompletedCircleChat,
-          isShowingTutorial
-        });
+
         
         // Complete the current tutorial first if needed
         if (currentTutorial === 'welcome') {
@@ -241,7 +236,7 @@ export default function FriendsScreen() {
               // Add interaction handler for Discover Circles tab
               if (step.id === 'friends-2') {
                 baseStep.onTargetPress = () => {
-                  console.log('[Friends Tutorial] Discover Circles tab clicked');
+
                   setActiveTab('circles');
                   nextStep();
                 };
@@ -249,7 +244,7 @@ export default function FriendsScreen() {
               
               // For refresh button, provide a placeholder if position not available yet
               if (step.id === 'friends-4' && !elementPositions[step.id]) {
-                console.log('[Friends Tutorial] Refresh button position not available yet');
+
                 // The position will be updated when we switch to circles tab
               }
               
@@ -266,7 +261,7 @@ export default function FriendsScreen() {
               highlightColor: '#10B981',
               requiresInteraction: true,
               onTargetPress: () => {
-                console.log('[Friends Tutorial] Sprints tab clicked, navigating...');
+
                 // Complete the friends tutorial
                 completeTutorial();
                 // Navigate to sprints tab after a small delay
@@ -312,7 +307,7 @@ export default function FriendsScreen() {
   useEffect(() => {
     // Only log when tutorial is active and tab switch might matter
     if (currentTutorial === 'friendsDiscovery' && isShowingTutorial && prevActiveTab !== activeTab) {
-      console.log('[Friends Tutorial] Tab switched:', prevActiveTab, '->', activeTab);
+
     }
     
     if (activeTab === 'circles') {
@@ -373,31 +368,22 @@ export default function FriendsScreen() {
             recentlyCompleted = completedAt > twoMinutesAgo;
           }
         } catch (error) {
-          console.error('[Friends Tutorial] Error checking completion timestamp:', error);
+          // Error checking completion timestamp handled silently
         }
 
         // Check if should start friends tutorial when screen focuses
-        console.log('[Friends Tutorial] Focus effect checking:', {
-          user: !!user,
-          hasSeenFriendsDiscovery: progress.hasSeenFriendsDiscovery,
-          hasSeenCircleChat: progress.hasSeenCircleChat,
-          currentTutorial,
-          isShowingTutorial,
-          hasAttemptedStart: hasAttemptedTutorialStart.current,
-          recentlyCompleted,
-          elementCount: Object.keys(elementPositions).length
-        });
+
 
         if (user && !progress.hasSeenFriendsDiscovery && !currentTutorial && !isShowingTutorial) {
           // Check if we should start friends tutorial (either from circle chat completion OR queued)
           const shouldStart = progress.hasSeenCircleChat || hasQueuedTutorial('friendsDiscovery') || recentlyCompleted;
           
-          console.log('[Friends Tutorial] Should start?', shouldStart);
+
           
           if (shouldStart) {
             // This is a fallback in case the main useEffect didn't trigger
             // Don't use hasAttemptedTutorialStart here as it might have been set in the other useEffect
-            console.log('[Friends Tutorial] Focus effect will attempt to start tutorial');
+
             
             // Ensure all elements are measured before starting
             searchAreaElement.measure();
@@ -418,8 +404,7 @@ export default function FriendsScreen() {
               
               // Also check if tutorial isn't already showing (from the other useEffect)
               if (hasAllRequired && !isShowingTutorial && !currentTutorial) {
-                console.log('[Friends Tutorial] Starting friends discovery tutorial from focus effect');
-                console.log('[Friends Tutorial] Element positions:', elementPositions);
+
                 // Update steps with measured positions
                 const stepsWithPositions = friendsDiscoverySteps.map(step => {
                   const baseStep: any = {
@@ -432,11 +417,11 @@ export default function FriendsScreen() {
                   if (step.id === 'friends-2') {
                     baseStep.requiresInteraction = true;
                     baseStep.onTargetPress = () => {
-                      console.log('[Friends Tutorial] onTargetPress called for Discover Circles');
+
                       setActiveTab('circles');
                       // Small delay to ensure tab switch completes
                       setTimeout(() => {
-                        console.log('[Friends Tutorial] Calling nextStep after tab switch');
+
                         nextStep();
                       }, 300);
                     };
@@ -446,7 +431,7 @@ export default function FriendsScreen() {
                   
                   // For refresh button (friends-4), check if we need to provide a placeholder
                   if (step.id === 'friends-4' && !elementPositions[step.id]) {
-                    console.log('[Friends Tutorial] Refresh button position not available yet');
+
                     // The position will be updated when we switch to circles tab
                   }
                   
@@ -463,7 +448,7 @@ export default function FriendsScreen() {
                   highlightColor: '#10B981',
                   requiresInteraction: true,
                   onTargetPress: () => {
-                    console.log('[Friends Tutorial] Sprints tab clicked, navigating...');
+
                     // Complete the friends tutorial
                     completeTutorial();
                     // Navigate to sprints tab after a small delay
@@ -1100,7 +1085,6 @@ export default function FriendsScreen() {
           <View ref={discoverCirclesTabElement.ref} className="flex-1" collapsable={false}>
             <TouchableOpacity
               onPress={() => {
-                console.log('[Friends] Discover Circles tab pressed');
                 setActiveTab('circles');
               }}
               className={`flex-1 py-3 px-4 rounded-lg ${

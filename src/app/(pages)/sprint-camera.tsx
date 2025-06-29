@@ -293,7 +293,7 @@ export default function SprintCameraPage() {
         onCapture={handleCapture}
         onCancel={handleCancel}
         tutorialElementRefs={{
-          cameraElement: cameraElement.ref,
+          cameraElement: cameraElement.ref as React.RefObject<View>,
         }}
         onElementMeasure={handleElementMeasure}
       />

@@ -84,7 +84,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
       const oldKey = '@sprintloop_tutorial_progress';
       try {
         await AsyncStorage.removeItem(oldKey);
-        console.log('[Tutorial Context] Cleaned up old generic tutorial key');
+
       } catch (e) {
         // Ignore cleanup errors
       }
@@ -114,7 +114,6 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
         setProgress(defaultProgress);
       }
     } catch (error) {
-      console.error('Error loading tutorial progress:', error);
       setProgress(defaultProgress);
     }
   };
@@ -123,14 +122,14 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     try {
       const storageKey = getStorageKey();
       if (!storageKey) {
-        console.log('[Tutorial Context] Cannot save progress - no user');
+
         return;
       }
 
       await AsyncStorage.setItem(storageKey, JSON.stringify(newProgress));
       setProgress(newProgress);
     } catch (error) {
-      console.error('Error saving tutorial progress:', error);
+      // Error saving tutorial progress handled silently
     }
   };
 
@@ -154,7 +153,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     };
 
     if (!hasSeenMap[tutorialId]) {
-      console.log('[Tutorial Context] Starting tutorial:', tutorialId);
+
       startTutorial(tutorialId, steps);
       return true;
     }
@@ -199,12 +198,12 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
       const nextTutorial = tutorialQueue[0];
       setTutorialQueue(prev => prev.slice(1));
       
-      console.log('[Tutorial Context] Starting queued tutorial:', nextTutorial);
+
       
       // For now, just store that there's a queued tutorial
       // The actual tutorial will be triggered when the user navigates to the appropriate screen
       if (nextTutorial === 'friendsDiscovery') {
-        console.log('[Tutorial Context] Friends tutorial queued, will start when user visits Friends tab');
+
       }
     }
   };
@@ -216,7 +215,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
   const completeTutorial = () => {
     if (!currentTutorial) return;
 
-    console.log('[Tutorial Context] Completing tutorial:', currentTutorial);
+
 
     // Mark tutorial as completed
     const newProgress = { ...progress };
@@ -256,12 +255,11 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     
     // For circle chat/circles navigation tutorial, set a flag to trigger friends tutorial when user navigates to friends tab
     if (completedTutorial === 'circleChat') {
-      console.log('[Tutorial Context] Circles/Circle chat completed, ready for friends tutorial');
-      console.log('[Tutorial Context] Updated progress:', newProgress);
+
       // Set a timestamp so friends screen knows this just happened
-      AsyncStorage.setItem('circleChat_completed_at', Date.now().toString()).catch(error => {
-        console.error('[Tutorial Context] Error saving completion timestamp:', error);
-      });
+              AsyncStorage.setItem('circleChat_completed_at', Date.now().toString()).catch(error => {
+          // Error saving completion timestamp handled silently
+        });
     }
     
     // Skip tutorial after setting flags
@@ -290,7 +288,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     // Only update if something changed
     const stepToUpdate = tutorialSteps.find(s => s.id === stepId);
     if (stepToUpdate && (!stepToUpdate.targetElement || stepToUpdate.targetElement !== targetElement)) {
-      console.log(`[Tutorial Context] Updated targetElement for step ${stepId}`);
+
       setTutorialSteps(updatedSteps);
     }
   };

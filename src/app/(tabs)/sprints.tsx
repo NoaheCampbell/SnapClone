@@ -46,7 +46,7 @@ interface Circle {
 
 export default function SprintsTab() {
   const { user } = useAuth();
-  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials, nextStep, currentTutorial, currentStep, completeTutorial } = useTutorial();
+  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials, nextStep, currentTutorial, currentStep, completeTutorial, updateStepTargetElement } = useTutorial();
   const [recentSprints, setRecentSprints] = useState<Sprint[]>([]);
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +57,7 @@ export default function SprintsTab() {
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
   const [activeTab, setActiveTab] = useState<'start' | 'history'>('start');
   const [elementPositions, setElementPositions] = useState<Record<string, any>>({});
+  const prevActiveTabRef = useRef<'start' | 'history'>('start');
 
   const params = useLocalSearchParams<{
     viewSprint?: string;
@@ -77,15 +78,12 @@ export default function SprintsTab() {
   const sprintTabSwitcherElement = useTutorialElement('sprint-tabs-1', handleElementMeasure, [activeTab]);
   const firstCircleElement = useTutorialElement('sprint-tabs-2', handleElementMeasure, [myCircles.length]);
   const recentSprintsTabElement = useTutorialElement('sprint-tabs-3', handleElementMeasure, []);
-  const firstSprintElement = useTutorialElement('sprint-tabs-4', handleElementMeasure, [recentSprints.length]);
+  const firstSprintElement = useTutorialElement('sprint-tabs-4', handleElementMeasure, []);
 
   // Ensure elements are measured after render
   useEffect(() => {
     // Give the UI time to render before measuring
     const timer = setTimeout(() => {
-      console.log('[Tutorial Debug] Manually triggering element measurements');
-      console.log('[Tutorial Debug] Screen width:', screenWidth);
-      console.log('[Tutorial Debug] Calculated inbox position:', screenWidth * 0.32);
       streakElement.measure();
       circlesTabElement.measure();
       tabBarElement.measure();
@@ -99,7 +97,6 @@ export default function SprintsTab() {
     React.useCallback(() => {
       // Check if user arrived here during friends tutorial final step
       if (isShowingTutorial && currentTutorial === 'friendsDiscovery' && currentStep >= 4) {
-        console.log('[Sprints] User navigated here during friends tutorial final step, completing...');
         // Complete the friends tutorial
         setTimeout(() => {
           completeTutorial();
@@ -108,29 +105,74 @@ export default function SprintsTab() {
     }, [isShowingTutorial, currentTutorial, currentStep, completeTutorial])
   );
 
+  // Ensure sprint tabs tutorial elements are measured when needed
+  useEffect(() => {
+    if (currentTutorial === 'sprintTabs' && isShowingTutorial) {
+      // For step 3 (View Active Sprints), ensure Recent Sprints tab is measured
+      if (currentStep === 2) {
+        setTimeout(() => {
+          recentSprintsTabElement.measure();
+          
+          // Update the tutorial step with the measured position if available
+          setTimeout(() => {
+            if (elementPositions['sprint-tabs-3'] && updateStepTargetElement) {
+              updateStepTargetElement('sprint-tabs-3', elementPositions['sprint-tabs-3']);
+            }
+          }, 100);
+        }, 100);
+      }
+      
+      // For step 4 (Sprint Actions), ensure first sprint element is measured when on history tab
+      if (currentStep === 3 && activeTab === 'history') {
+        setTimeout(() => {
+          firstSprintElement.measure();
+          
+          // Update the tutorial step with the measured position if available
+          setTimeout(() => {
+            if (elementPositions['sprint-tabs-4'] && updateStepTargetElement) {
+              updateStepTargetElement('sprint-tabs-4', elementPositions['sprint-tabs-4']);
+            }
+          }, 100);
+        }, 100);
+      }
+    }
+  }, [currentTutorial, isShowingTutorial, currentStep, activeTab, elementPositions, updateStepTargetElement]);
+
   // Detect tab changes during sprint tabs tutorial
   useEffect(() => {
     // Check if we're in the sprint tabs tutorial and on the step that asks to tap Recent Sprints
-    if (currentTutorial === 'sprintTabs' && isShowingTutorial && currentStep === 2 && activeTab === 'history') {
-      console.log('[Sprint Tabs Tutorial] User switched to history tab, advancing tutorial...');
-      // Advance to the next step
-      setTimeout(() => {
-        nextStep();
-      }, 300);
+    if (currentTutorial === 'sprintTabs' && isShowingTutorial && currentStep === 2) {
+      // Only advance if there was an actual tab change from 'start' to 'history'
+      if (prevActiveTabRef.current === 'start' && activeTab === 'history') {
+        // Advance to the next step
+        setTimeout(() => {
+          nextStep();
+        }, 300);
+      }
     }
+    
+    // Update the previous tab ref
+    prevActiveTabRef.current = activeTab;
   }, [currentTutorial, isShowingTutorial, currentStep, activeTab, nextStep]);
 
   // Start sprint tabs tutorial when returning from friends tutorial
   useEffect(() => {
     if (!loading && user && progress.hasSeenFriendsDiscovery && !progress.hasSeenSprintTabs && !isShowingTutorial) {
-      console.log('[Sprint Tabs Tutorial] Starting sprint tabs tutorial');
+      // Ensure we start on the 'start' tab for the tutorial flow
+      setActiveTab('start');
       
       // Measure elements
       setTimeout(() => {
         sprintTabSwitcherElement.measure();
         if (myCircles.length > 0) firstCircleElement.measure();
         recentSprintsTabElement.measure();
-        if (recentSprints.length > 0) firstSprintElement.measure();
+        // Always measure firstSprintElement since we'll have dummy sprint during tutorial
+        firstSprintElement.measure();
+        
+        // Extra measurement for Recent Sprints tab to ensure it's captured
+        setTimeout(() => {
+          recentSprintsTabElement.measure();
+        }, 100);
         
         // Wait for measurements
         setTimeout(() => {
@@ -145,7 +187,6 @@ export default function SprintsTab() {
             // Add interaction handler for Recent Sprints tab
             if (step.id === 'sprint-tabs-3') {
               baseStep.onTargetPress = () => {
-                console.log('[Sprint Tabs Tutorial] Recent Sprints tab clicked');
                 setActiveTab('history');
                 nextStep();
               };
@@ -157,25 +198,15 @@ export default function SprintsTab() {
           // Add completion step
           const allSteps = [...stepsWithPositions, tutorialCompletedStep];
           checkAndStartTutorial('sprintTabs', allSteps);
-        }, 300);
+        }, 400); // Increased delay to ensure measurements complete
       }, 500);
     }
-  }, [loading, user, progress.hasSeenFriendsDiscovery, progress.hasSeenSprintTabs, isShowingTutorial, myCircles.length, recentSprints.length, elementPositions]);
+  }, [loading, user, progress.hasSeenFriendsDiscovery, progress.hasSeenSprintTabs, isShowingTutorial, myCircles.length, elementPositions]);
 
   // Start welcome tutorial for new users
   useEffect(() => {
-    console.log('[Tutorial Debug] Checking tutorial conditions:', {
-      loading,
-      hasUser: !!user,
-      hasSeenWelcome: progress.hasSeenWelcome,
-      circleCount: myCircles.length,
-      elementPositionsCount: Object.keys(elementPositions).length,
-      isShowingTutorial
-    });
-    
     // Wait for elements to be measured
     if (!loading && user && !progress.hasSeenWelcome && Object.keys(elementPositions).length >= 3) {
-      console.log('[Tutorial Debug] Tutorial conditions met, preparing steps...');
       
       // Update tutorial steps with measured positions
       const stepsWithPositions = welcomeTutorialSteps.map(step => {
@@ -192,12 +223,10 @@ export default function SprintsTab() {
         
         // Add navigation handling for the Circles tab step
         if (step.id === 'welcome-4' && elementPositions[step.id]) {
-          console.log('[Tutorial Debug] Setting up interactive step with position:', elementPositions[step.id]);
           return {
             ...baseStep,
             requiresInteraction: true, // Keep interaction required
             onTargetPress: () => {
-              console.log('[Tutorial] Circles tab area clicked, navigating...');
               // Navigate to inbox (circles) tab
               router.push('/(tabs)/inbox');
               // Advance to next step after navigation
@@ -214,9 +243,6 @@ export default function SprintsTab() {
       // Don't add the completion step yet - it will be shown after all tutorials
       const allSteps = [...stepsWithPositions];
       
-      console.log('[Tutorial Debug] Starting tutorial with steps:', allSteps.length);
-      console.log('[Tutorial Debug] Step IDs:', allSteps.map(s => s.id));
-      console.log('[Tutorial Debug] Interactive steps:', allSteps.filter(s => s.requiresInteraction).map(s => s.id));
       checkAndStartTutorial('welcome', allSteps);
     }
   }, [loading, user, progress.hasSeenWelcome, myCircles.length, elementPositions]);
@@ -281,7 +307,6 @@ export default function SprintsTab() {
         .rpc('get_user_circles');
 
       if (circlesError) {
-        console.error('Error loading circles:', circlesError);
         throw circlesError;
       }
 
@@ -325,12 +350,18 @@ export default function SprintsTab() {
         setUserStreak({ current_len: 0, freeze_tokens: 0 });
       }
     } catch (error) {
-      console.error('Error loading sprints data:', error);
+      // Error loading sprints data
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [user]);
+
+  // Add dummy sprint to recent sprints during tutorial
+  const displaySprints = useMemo(() => {
+    // Just return the actual sprints without any dummy data
+    return recentSprints;
+  }, [recentSprints]);
 
   const formatTimeRemaining = (milliseconds: number) => {
     const minutes = Math.floor(milliseconds / (1000 * 60));
@@ -387,7 +418,6 @@ export default function SprintsTab() {
               // Refresh the data to remove the deleted sprint from the list
               loadData();
             } catch (error) {
-              console.error('Error deleting sprint:', error);
               Alert.alert('Error', 'Failed to delete sprint. Please try again.');
             }
           }
@@ -456,7 +486,7 @@ export default function SprintsTab() {
             content: `⏹️ ${username} ended their "${topic}" sprint early`
           });
 
-        if (messageError) console.error('Error sending sprint end notification:', messageError);
+        // Error sending sprint end notification handled silently
       }
 
       // Navigate to sprint completion page
@@ -475,7 +505,6 @@ export default function SprintsTab() {
       
       loadData(); // Refresh the data
     } catch (error) {
-      console.error('Error ending sprint:', error);
       Alert.alert('Error', 'Failed to end sprint. Please try again.');
     }
   };
@@ -548,7 +577,7 @@ export default function SprintsTab() {
             content: `🏁 ${username} completed their "${sprint.topic}" sprint!`
           });
 
-        if (messageError) console.error('Error sending sprint completion notification:', messageError);
+        // Error sending sprint completion notification handled silently
       }
 
       setEndingSprintId('');
@@ -569,7 +598,6 @@ export default function SprintsTab() {
       
       loadData(); // Refresh the data
     } catch (error) {
-      console.error('Error completing sprint:', error);
       Alert.alert('Error', 'Failed to complete sprint. Please try again.');
     }
   };
@@ -942,13 +970,12 @@ export default function SprintsTab() {
         }
       } else {
         // No root message found - this shouldn't normally happen
-        console.error('No root message found for sprint:', sprint.id);
       }
 
       // Navigate to chat
               router.push(`/(pages)/chat?circleId=${sprint.circle_id}`);
     } catch (error) {
-      console.error('Error joining sprint:', error);
+      // Error joining sprint handled silently
     }
   };
 
@@ -1000,92 +1027,6 @@ export default function SprintsTab() {
               <Text className="text-blue-300 text-sm ml-1">{userStreak.freeze_tokens} tokens</Text>
             </View>
           </View>
-          
-          {/* Debug Tutorial Buttons - Remove in production */}
-          {__DEV__ && (
-            <View className="flex-row mt-2 space-x-2">
-              <TouchableOpacity 
-                onPress={() => {
-                  console.log('[Tutorial Debug] Manual trigger pressed');
-                  console.log('[Tutorial Debug] Current element positions:', elementPositions);
-                  
-                  // Force measure elements again
-                  streakElement.measure();
-                  circlesTabElement.measure();
-                  tabBarElement.measure();
-                  
-                  // Wait a bit for measurements
-                  setTimeout(() => {
-                    const stepsWithPositions = welcomeTutorialSteps.map(step => {
-                      const baseStep: any = {
-                        ...step,
-                        highlightColor: '#10B981', // Consistent green highlight
-                        tooltipPosition: step.position,
-                      };
-                      if (elementPositions[step.id]) {
-                        baseStep.targetElement = elementPositions[step.id];
-                      }
-                      return baseStep;
-                    });
-                    const allSteps = [...stepsWithPositions, tutorialCompletedStep];
-                    startTutorial('welcome', allSteps);
-                  }, 100);
-                }}
-                className="bg-purple-600 px-3 py-1 rounded-lg"
-              >
-                <Text className="text-white text-sm">Start Tutorial</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                onPress={async () => {
-                  console.log('[Tutorial Debug] Reset tutorial progress');
-                  await resetTutorials();
-                  Alert.alert('Debug', 'Tutorial progress reset. Reload screen to trigger tutorial.');
-                }}
-                className="bg-red-600 px-3 py-1 rounded-lg"
-              >
-                <Text className="text-white text-sm">Reset Tutorial</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                onPress={() => {
-                  console.log('[Tutorial Debug] Interactive demo');
-                  // Create a simple interactive demo
-                  const demoSteps = [
-                    {
-                      id: 'demo-1',
-                      title: 'Interactive Tutorial Demo',
-                      description: 'This tutorial requires you to tap on highlighted elements. Try it!',
-                      tooltipPosition: 'center' as const,
-                      highlightColor: '#10B981',
-                    },
-                    {
-                      id: 'demo-2',
-                      title: 'Tap the Streak Counter',
-                      description: 'The app is now blocked except for the highlighted area. Tap your streak to continue!',
-                      targetElement: elementPositions['welcome-3'],
-                      tooltipPosition: 'bottom' as const,
-                      highlightColor: '#10B981',
-                      requiresInteraction: true,
-                      onTargetPress: () => {
-                        console.log('[Demo] Streak tapped!');
-                        nextStep();
-                      }
-                    },
-                    {
-                      id: 'demo-3',
-                      title: 'Great Job! 🎉',
-                      description: 'You successfully completed an interactive step. In the real tutorial, this would navigate you to the next screen.',
-                      tooltipPosition: 'center' as const,
-                      highlightColor: '#10B981',
-                    }
-                  ];
-                  startTutorial('demo', demoSteps);
-                }}
-                className="bg-yellow-600 px-3 py-1 rounded-lg"
-              >
-                <Text className="text-white text-sm">Interactive Demo</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
 
         {/* Tab Navigation */}
@@ -1176,7 +1117,7 @@ export default function SprintsTab() {
               <Text className="text-gray-400 text-sm mt-1">Your recent and active sprints</Text>
             </View>
             
-            {recentSprints.length > 0 ? (
+            {displaySprints.length > 0 ? (
               <CustomPullToRefresh
                 onRefresh={() => {
                   setRefreshing(true);
@@ -1185,7 +1126,7 @@ export default function SprintsTab() {
                 refreshing={refreshing}
               >
                 <FlatList
-                  data={recentSprints}
+                  data={displaySprints}
                   renderItem={renderSprint}
                   keyExtractor={(item) => item.id}
                   showsVerticalScrollIndicator={false}
