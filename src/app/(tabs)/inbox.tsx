@@ -1,5 +1,6 @@
 import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native'
 import GifLoadingIndicator from '../../components/GifLoadingIndicator'
+import CustomPullToRefresh from '../../components/CustomPullToRefresh'
 import React, { useState, useEffect, memo, useCallback } from 'react'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
@@ -124,6 +125,7 @@ const MemoizedCircleItem = memo(({
 export default function InboxScreen() {
   const [circles, setCircles] = useState<CirclePreview[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [lastMessageTimes, setLastMessageTimes] = useState<Record<string, string>>({})
 
   // Refresh chats when the screen comes into focus
@@ -370,6 +372,12 @@ export default function InboxScreen() {
     }
   }
 
+  const onRefresh = async () => {
+    setRefreshing(true)
+    await loadCircles()
+    setRefreshing(false)
+  }
+
   const formatTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp)
     const now = new Date()
@@ -448,20 +456,25 @@ export default function InboxScreen() {
 
         {/* Circle List */}
         {circles.length > 0 ? (
-          <FlatList
-            data={circles}
-            renderItem={renderCircleItem}
-            keyExtractor={(item) => item.id}
-            className="flex-1"
-            removeClippedSubviews={true}
-            initialNumToRender={20}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-            updateCellsBatchingPeriod={50}
-            maintainVisibleContentPosition={{
-              minIndexForVisible: 0
-            }}
-          />
+          <CustomPullToRefresh
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+          >
+            <FlatList
+              data={circles}
+              renderItem={renderCircleItem}
+              keyExtractor={(item) => item.id}
+              className="flex-1"
+              removeClippedSubviews={true}
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              updateCellsBatchingPeriod={50}
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0
+              }}
+            />
+          </CustomPullToRefresh>
         ) : (
           <View className="flex-1 justify-center items-center p-8">
             <Feather name="message-circle" size={64} color="gray" />

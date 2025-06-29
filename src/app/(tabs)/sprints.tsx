@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView, RefreshControl } from 'react-native';
+import { FlatList, Pressable, View, Text, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
 import GifLoadingIndicator from '../../components/GifLoadingIndicator';
+import CustomPullToRefresh from '../../components/CustomPullToRefresh';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
@@ -875,24 +876,32 @@ export default function SprintsTab() {
             </View>
             
             {myCircles.length > 0 ? (
-              <FlatList
-                data={myCircles}
-                renderItem={renderCircle}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 20 }}
-                ListEmptyComponent={
-                  <View className="flex-1 items-center justify-center px-8 py-20">
-                    <Feather name="users" size={48} color="gray" />
-                    <Text className="text-gray-400 text-lg mt-4 text-center">
-                      No circles yet
-                    </Text>
-                    <Text className="text-gray-500 text-sm mt-2 text-center">
-                      Join or create a circle to start sprinting
-                    </Text>
-                  </View>
-                }
-              />
+              <CustomPullToRefresh
+                onRefresh={() => {
+                  setRefreshing(true);
+                  loadData();
+                }}
+                refreshing={refreshing}
+              >
+                <FlatList
+                  data={myCircles}
+                  renderItem={renderCircle}
+                  keyExtractor={(item) => item.id}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                  ListEmptyComponent={
+                    <View className="flex-1 items-center justify-center px-8 py-20">
+                      <Feather name="users" size={48} color="gray" />
+                      <Text className="text-gray-400 text-lg mt-4 text-center">
+                        No circles yet
+                      </Text>
+                      <Text className="text-gray-500 text-sm mt-2 text-center">
+                        Join or create a circle to start sprinting
+                      </Text>
+                    </View>
+                  }
+                />
+              </CustomPullToRefresh>
             ) : (
               <View className="flex-1 items-center justify-center px-8">
                 <Feather name="users" size={48} color="gray" />
@@ -914,27 +923,21 @@ export default function SprintsTab() {
             </View>
             
             {recentSprints.length > 0 ? (
-              <FlatList
-                data={recentSprints}
-                renderItem={renderSprint}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={() => {
-                      setRefreshing(true);
-                      loadData();
-                    }}
-                    tintColor="#3B82F6"
-                    colors={['#3B82F6', '#60A5FA', '#93C5FD']}
-                    progressBackgroundColor="#1F2937"
-                    title="Pull to refresh sprints"
-                    titleColor="#9CA3AF"
-                  />
-                }
-                contentContainerStyle={{ paddingBottom: 20 }}
-              />
+              <CustomPullToRefresh
+                onRefresh={() => {
+                  setRefreshing(true);
+                  loadData();
+                }}
+                refreshing={refreshing}
+              >
+                <FlatList
+                  data={recentSprints}
+                  renderItem={renderSprint}
+                  keyExtractor={(item) => item.id}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                />
+              </CustomPullToRefresh>
             ) : (
               <View className="flex-1 justify-center items-center px-8">
                 <Feather name="clock" size={48} color="gray" />

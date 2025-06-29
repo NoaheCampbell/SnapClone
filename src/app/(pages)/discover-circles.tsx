@@ -5,13 +5,13 @@ import {
   FlatList, 
   TouchableOpacity, 
   Alert,
-  TextInput,
-  RefreshControl
+  TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import GifLoadingIndicator from '../../components/GifLoadingIndicator';
+import CustomPullToRefresh from '../../components/CustomPullToRefresh';
 import { supabase } from '../../../lib/supabase';
 
 interface PublicCircle {
@@ -248,22 +248,16 @@ export default function DiscoverCirclesScreen() {
         </View>
 
         {filteredCircles.length > 0 ? (
-          <FlatList
-            data={filteredCircles}
-            renderItem={renderCircleItem}
-            keyExtractor={(item) => item.id}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor="#10B981"
-                colors={['#10B981', '#34D399', '#6EE7B7']}
-                progressBackgroundColor="#1F2937"
-                title="Pull to refresh circles"
-                titleColor="#9CA3AF"
-              />
-            }
-          />
+          <CustomPullToRefresh
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+          >
+            <FlatList
+              data={filteredCircles}
+              renderItem={renderCircleItem}
+              keyExtractor={(item) => item.id}
+            />
+          </CustomPullToRefresh>
         ) : (
           <View className="flex-1 justify-center items-center p-8">
             {loading ? (
