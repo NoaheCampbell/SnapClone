@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity, Alert } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity, Alert, Dimensions } from 'react-native'
 import GifLoadingIndicator from '../../components/GifLoadingIndicator'
 import CustomPullToRefresh from '../../components/CustomPullToRefresh'
 import React, { useState, useEffect, memo, useCallback } from 'react'
@@ -6,6 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useFocusEffect } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
+import { useTutorial } from '../../contexts/TutorialContext'
+import { useTutorialElement } from '../../hooks/useTutorialElement'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
 interface CirclePreview {
   id: string
@@ -127,13 +130,100 @@ export default function InboxScreen() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastMessageTimes, setLastMessageTimes] = useState<Record<string, string>>({})
+  const screenWidth = Dimensions.get('window').width
+  
+  // Tutorial setup
+  const { checkAndStartTutorial, progress, isShowingTutorial, completeTutorial } = useTutorial();
+  const [elementPositions, setElementPositions] = useState<Record<string, any>>({});
+  
+  // Tutorial element registration callback
+  const handleElementMeasure = useCallback((stepId: string, position: any) => {
+    setElementPositions(prev => ({ ...prev, [stepId]: position }));
+  }, []);
+  
+  // Tutorial element refs
+  const headerElement = useTutorialElement('circles-1', handleElementMeasure, []);
+  const createButtonElement = useTutorialElement('circles-2', handleElementMeasure, []);
+  const discoverButtonElement = useTutorialElement('circles-3', handleElementMeasure, []);
+  const friendsTabElement = useTutorialElement('circles-4', handleElementMeasure, []);
 
   // Refresh chats when the screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       loadCircles()
+      
+      // Measure tutorial elements after a delay
+      setTimeout(() => {
+        headerElement.measure();
+        createButtonElement.measure();
+        discoverButtonElement.measure();
+        friendsTabElement.measure();
+      }, 300);
     }, [])
   )
+  
+  // Start circles tutorial when coming from welcome tutorial
+  useEffect(() => {
+    if (!loading && !progress.hasSeenCircleChat && Object.keys(elementPositions).length >= 4) {
+      // Define circles tutorial steps
+      const circlesTutorialSteps = [
+        {
+          id: 'circles-1',
+          title: 'Your Study Circles 📚',
+          description: 'This is where all your study groups live! Each circle is a space to complete sprints together and chat with your study buddies.',
+          targetElement: elementPositions['circles-1'],
+          tooltipPosition: 'bottom' as const,
+          highlightColor: '#10B981',
+        },
+        {
+          id: 'circles-2',
+          title: 'Create New Circles ➕',
+          description: 'Tap here to create your own study circle. You can make it public for anyone to join, or private for just your friends!',
+          targetElement: elementPositions['circles-2'],
+          tooltipPosition: 'left' as const,
+          highlightColor: '#10B981',
+        },
+        {
+          id: 'circles-3',
+          title: 'Discover Public Circles 🔍',
+          description: 'Find and join public study groups based on your interests. Great for meeting new study partners!',
+          targetElement: elementPositions['circles-3'],
+          tooltipPosition: 'left' as const,
+          highlightColor: '#10B981',
+        },
+        {
+          id: 'circles-4',
+          title: 'Find Study Buddies! 👥',
+          description: 'Now let\'s find some friends to study with! Tap the Friends tab below to continue.',
+          targetElement: elementPositions['circles-4'],
+          tooltipPosition: 'top' as const,
+          highlightColor: '#10B981',
+          requiresInteraction: true,
+          onTargetPress: async () => {
+            console.log('[Circles Tutorial] Friends tab clicked, completing tutorial...');
+            
+            // Set completion timestamp before navigation
+            try {
+              await AsyncStorage.setItem('circleChat_completed_at', Date.now().toString());
+            } catch (error) {
+              console.error('[Circles Tutorial] Error saving completion timestamp:', error);
+            }
+            
+            // Complete the circles tutorial first
+            completeTutorial();
+            
+            // Then navigate to friends tab after a delay to ensure tutorial context updates
+            setTimeout(() => {
+              console.log('[Circles Tutorial] Navigating to friends tab...');
+              router.push('/(tabs)/friends');
+            }, 300); // Increased delay to ensure context updates
+          }
+        },
+      ];
+      
+      checkAndStartTutorial('circleChat', circlesTutorialSteps);
+    }
+  }, [loading, progress.hasSeenCircleChat, elementPositions]);
 
   useEffect(() => {
     let channel: any // RealtimeChannel – keep as any to avoid importing extra type
@@ -443,12 +533,14 @@ export default function InboxScreen() {
       <View className="flex-1">
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-gray-800">
-          <Text className="text-white text-xl font-bold">Circles</Text>
+          <View ref={headerElement.ref} collapsable={false}>
+            <Text className="text-white text-xl font-bold">Circles</Text>
+          </View>
           <View className="flex-row items-center gap-4">
-            <TouchableOpacity onPress={() => router.push('/(pages)/discover-circles')}>
+            <TouchableOpacity onPress={() => router.push('/(pages)/discover-circles')} ref={discoverButtonElement.ref}>
               <Feather name="search" size={24} color="white" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/(pages)/new-chat')}>
+            <TouchableOpacity onPress={() => router.push('/(pages)/new-chat')} ref={createButtonElement.ref}>
               <Feather name="plus-circle" size={24} color="white" />
             </TouchableOpacity>
           </View>
@@ -501,6 +593,20 @@ export default function InboxScreen() {
           </View>
         )}
       </View>
+      
+      {/* Friends tab reference - positioned at bottom for tutorial */}
+      <View 
+        style={{ 
+          position: 'absolute', 
+          bottom: 34, // Raised a little higher to align with icon
+          left: (screenWidth * 0.125) - 22, // First tab position minus half icon width
+          width: 44, // Icon size plus padding
+          height: 44, // Icon size plus padding
+          pointerEvents: 'none' 
+        }} 
+        ref={friendsTabElement.ref}
+        collapsable={false}
+      />
     </SafeAreaView>
   )
 }

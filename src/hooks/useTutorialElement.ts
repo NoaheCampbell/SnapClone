@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { View } from 'react-native';
+import { View, StatusBar, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ElementPosition {
   x: number;
@@ -14,23 +15,39 @@ export function useTutorialElement(
   dependencies: any[] = []
 ) {
   const elementRef = useRef<View>(null);
+  const insets = useSafeAreaInsets();
 
   const measureElement = useCallback(() => {
     if (elementRef.current) {
-      console.log(`[Tutorial Element] Measuring element for step: ${stepId}`);
       elementRef.current.measure((x, y, width, height, pageX, pageY) => {
-        console.log(`[Tutorial Element] Measured ${stepId}:`, { pageX, pageY, width, height });
-        onMeasure(stepId, {
-          x: pageX,
-          y: pageY,
-          width,
-          height,
-        });
+        // Only log if the position is meaningful (not zero)
+        if (width > 0 && height > 0) {
+          // Get status bar height
+          const statusBarHeight = Platform.OS === 'ios' ? 0 : StatusBar.currentHeight || 0;
+          
+          // Adjust Y position to account for safe area and status bar
+          const adjustedY = pageY - insets.top - statusBarHeight;
+          
+          console.log(`[Tutorial Element] Measured ${stepId}:`, { 
+            pageX, 
+            pageY, 
+            adjustedY,
+            width, 
+            height,
+            insetsTop: insets.top,
+            statusBarHeight
+          });
+          
+          onMeasure(stepId, {
+            x: pageX,
+            y: adjustedY,
+            width,
+            height,
+          });
+        }
       });
-    } else {
-      console.log(`[Tutorial Element] No ref for step: ${stepId}`);
     }
-  }, [stepId, onMeasure]);
+  }, [stepId, onMeasure, insets.top]);
 
   useEffect(() => {
     // Delay measurement to ensure layout is complete

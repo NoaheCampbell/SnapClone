@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
-import { FlatList, Pressable, View, Text, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
+import { FlatList, Pressable, View, Text, TouchableOpacity, Alert, TextInput, Image, Animated, StatusBar, TouchableWithoutFeedback, Keyboard, ScrollView, Dimensions } from 'react-native';
 import GifLoadingIndicator from '../../components/GifLoadingIndicator';
 import CustomPullToRefresh from '../../components/CustomPullToRefresh';
 import Slider from '@react-native-community/slider';
 import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTutorial } from '../../contexts/TutorialContext';
-import { welcomeTutorialSteps, tutorialCompletedStep } from '../../utils/tutorialSteps';
+import { welcomeTutorialSteps, tutorialCompletedStep, sprintTabsTutorialSteps } from '../../utils/tutorialSteps';
 import { useTutorialElement } from '../../hooks/useTutorialElement';
 import { supabase } from '../../../lib/supabase';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -15,6 +15,8 @@ import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
+
+const { width: screenWidth } = Dimensions.get('window');
 
 interface Sprint {
   id: string;
@@ -44,7 +46,7 @@ interface Circle {
 
 export default function SprintsTab() {
   const { user } = useAuth();
-  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials } = useTutorial();
+  const { checkAndStartTutorial, progress, isShowingTutorial, startTutorial, resetTutorials, nextStep, currentTutorial, currentStep } = useTutorial();
   const [recentSprints, setRecentSprints] = useState<Sprint[]>([]);
   const [myCircles, setMyCircles] = useState<Circle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,21 +70,71 @@ export default function SprintsTab() {
 
   // Tutorial element refs
   const streakElement = useTutorialElement('welcome-3', handleElementMeasure, [userStreak.current_len]);
-  const circleHeaderElement = useTutorialElement('welcome-4', handleElementMeasure, [myCircles.length]);
+  const circlesTabElement = useTutorialElement('welcome-4', handleElementMeasure, []); // For circles tab
   const tabBarElement = useTutorialElement('welcome-5', handleElementMeasure, []);
+  
+  // Sprint tabs tutorial refs
+  const sprintTabSwitcherElement = useTutorialElement('sprint-tabs-1', handleElementMeasure, [activeTab]);
+  const firstCircleElement = useTutorialElement('sprint-tabs-2', handleElementMeasure, [myCircles.length]);
+  const recentSprintsTabElement = useTutorialElement('sprint-tabs-3', handleElementMeasure, []);
+  const firstSprintElement = useTutorialElement('sprint-tabs-4', handleElementMeasure, [recentSprints.length]);
 
   // Ensure elements are measured after render
   useEffect(() => {
     // Give the UI time to render before measuring
     const timer = setTimeout(() => {
       console.log('[Tutorial Debug] Manually triggering element measurements');
+      console.log('[Tutorial Debug] Screen width:', screenWidth);
+      console.log('[Tutorial Debug] Calculated inbox position:', screenWidth * 0.32);
       streakElement.measure();
-      circleHeaderElement.measure();
+      circlesTabElement.measure();
       tabBarElement.measure();
     }, 500);
 
     return () => clearTimeout(timer);
   }, [userStreak.current_len, myCircles.length]);
+
+  // Start sprint tabs tutorial when returning from friends tutorial
+  useEffect(() => {
+    if (!loading && user && progress.hasSeenFriendsDiscovery && !progress.hasSeenSprintTabs && !isShowingTutorial) {
+      console.log('[Sprint Tabs Tutorial] Starting sprint tabs tutorial');
+      
+      // Measure elements
+      setTimeout(() => {
+        sprintTabSwitcherElement.measure();
+        if (myCircles.length > 0) firstCircleElement.measure();
+        recentSprintsTabElement.measure();
+        if (recentSprints.length > 0) firstSprintElement.measure();
+        
+        // Wait for measurements
+        setTimeout(() => {
+          const stepsWithPositions = sprintTabsTutorialSteps.map(step => {
+            const baseStep: any = {
+              ...step,
+              targetElement: elementPositions[step.id] || null,
+              highlightColor: '#10B981',
+              tooltipPosition: step.tooltipPosition || 'center',
+            };
+            
+            // Add interaction handler for Recent Sprints tab
+            if (step.id === 'sprint-tabs-3') {
+              baseStep.onTargetPress = () => {
+                console.log('[Sprint Tabs Tutorial] Recent Sprints tab clicked');
+                setActiveTab('history');
+                nextStep();
+              };
+            }
+            
+            return baseStep;
+          });
+          
+          // Add completion step
+          const allSteps = [...stepsWithPositions, tutorialCompletedStep];
+          checkAndStartTutorial('sprintTabs', allSteps);
+        }, 300);
+      }, 500);
+    }
+  }, [loading, user, progress.hasSeenFriendsDiscovery, progress.hasSeenSprintTabs, isShowingTutorial, myCircles.length, recentSprints.length, elementPositions]);
 
   // Start welcome tutorial for new users
   useEffect(() => {
@@ -101,16 +153,44 @@ export default function SprintsTab() {
       
       // Update tutorial steps with measured positions
       const stepsWithPositions = welcomeTutorialSteps.map(step => {
+        // Base transformation with green highlight color
+        const baseStep: any = {
+          ...step,
+          highlightColor: '#10B981', // Consistent green highlight
+          tooltipPosition: step.position,
+        };
+        
         if (elementPositions[step.id]) {
-          return { ...step, targetElement: elementPositions[step.id] };
+          baseStep.targetElement = elementPositions[step.id];
         }
-        return step;
+        
+        // Add navigation handling for the Circles tab step
+        if (step.id === 'welcome-4' && elementPositions[step.id]) {
+          console.log('[Tutorial Debug] Setting up interactive step with position:', elementPositions[step.id]);
+          return {
+            ...baseStep,
+            requiresInteraction: true, // Keep interaction required
+            onTargetPress: () => {
+              console.log('[Tutorial] Circles tab area clicked, navigating...');
+              // Navigate to inbox (circles) tab
+              router.push('/(tabs)/inbox');
+              // Advance to next step after navigation
+              setTimeout(() => {
+                nextStep();
+              }, 100);
+            }
+          };
+        }
+        
+        return baseStep;
       });
 
-      // Add the completion step at the end
-      const allSteps = [...stepsWithPositions, tutorialCompletedStep];
+      // Don't add the completion step yet - it will be shown after all tutorials
+      const allSteps = [...stepsWithPositions];
       
       console.log('[Tutorial Debug] Starting tutorial with steps:', allSteps.length);
+      console.log('[Tutorial Debug] Step IDs:', allSteps.map(s => s.id));
+      console.log('[Tutorial Debug] Interactive steps:', allSteps.filter(s => s.requiresInteraction).map(s => s.id));
       checkAndStartTutorial('welcome', allSteps);
     }
   }, [loading, user, progress.hasSeenWelcome, myCircles.length, elementPositions]);
@@ -552,7 +632,7 @@ export default function SprintsTab() {
     }
   }, [params, loading, recentSprints]);
 
-  const SwipeableSprintItem = memo(({ item }: { item: Sprint }) => {
+  const SwipeableSprintItem = memo(({ item, isFirst }: { item: Sprint; isFirst?: boolean }) => {
     const isMySprintAndActive = item.user_id === user?.id && item.is_active;
     
     // Calculate if sprint is still active (static check, timer component handles real-time updates)
@@ -594,7 +674,7 @@ export default function SprintsTab() {
     };
     
     const SprintContent = () => (
-      <View className="bg-gray-900 rounded-lg p-4 mb-3 mx-4">
+      <View ref={isFirst ? firstSprintElement.ref : undefined} className="bg-gray-900 rounded-lg p-4 mb-3 mx-4" collapsable={false}>
         <View className="flex-row justify-between items-start mb-2">
           <View className="flex-1">
             <Text className="text-white font-semibold text-lg">{item.topic}</Text>
@@ -736,12 +816,13 @@ export default function SprintsTab() {
     );
   });
 
-  const renderSprint = ({ item }: { item: Sprint }) => (
-    <SwipeableSprintItem item={item} />
+  const renderSprint = ({ item, index }: { item: Sprint; index: number }) => (
+    <SwipeableSprintItem item={item} isFirst={index === 0} />
   );
 
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
+      ref={myCircles.indexOf(item) === 0 ? firstCircleElement.ref : undefined}
       onPress={() => navigateToCreateSprint(item.id)}
       className="bg-gray-800 rounded-xl p-6 mb-4 mx-4 shadow-lg"
       activeOpacity={0.7}
@@ -904,16 +985,21 @@ export default function SprintsTab() {
                   
                   // Force measure elements again
                   streakElement.measure();
-                  circleHeaderElement.measure();
+                  circlesTabElement.measure();
                   tabBarElement.measure();
                   
                   // Wait a bit for measurements
                   setTimeout(() => {
                     const stepsWithPositions = welcomeTutorialSteps.map(step => {
+                      const baseStep: any = {
+                        ...step,
+                        highlightColor: '#10B981', // Consistent green highlight
+                        tooltipPosition: step.position,
+                      };
                       if (elementPositions[step.id]) {
-                        return { ...step, targetElement: elementPositions[step.id] };
+                        baseStep.targetElement = elementPositions[step.id];
                       }
-                      return step;
+                      return baseStep;
                     });
                     const allSteps = [...stepsWithPositions, tutorialCompletedStep];
                     startTutorial('welcome', allSteps);
@@ -933,13 +1019,52 @@ export default function SprintsTab() {
               >
                 <Text className="text-white text-sm">Reset Tutorial</Text>
               </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  console.log('[Tutorial Debug] Interactive demo');
+                  // Create a simple interactive demo
+                  const demoSteps = [
+                    {
+                      id: 'demo-1',
+                      title: 'Interactive Tutorial Demo',
+                      description: 'This tutorial requires you to tap on highlighted elements. Try it!',
+                      tooltipPosition: 'center' as const,
+                      highlightColor: '#10B981',
+                    },
+                    {
+                      id: 'demo-2',
+                      title: 'Tap the Streak Counter',
+                      description: 'The app is now blocked except for the highlighted area. Tap your streak to continue!',
+                      targetElement: elementPositions['welcome-3'],
+                      tooltipPosition: 'bottom' as const,
+                      highlightColor: '#10B981',
+                      requiresInteraction: true,
+                      onTargetPress: () => {
+                        console.log('[Demo] Streak tapped!');
+                        nextStep();
+                      }
+                    },
+                    {
+                      id: 'demo-3',
+                      title: 'Great Job! 🎉',
+                      description: 'You successfully completed an interactive step. In the real tutorial, this would navigate you to the next screen.',
+                      tooltipPosition: 'center' as const,
+                      highlightColor: '#10B981',
+                    }
+                  ];
+                  startTutorial('demo', demoSteps);
+                }}
+                className="bg-yellow-600 px-3 py-1 rounded-lg"
+              >
+                <Text className="text-white text-sm">Interactive Demo</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
 
         {/* Tab Navigation */}
         <View className="px-4 pb-4">
-          <View className="flex-row bg-gray-900 rounded-xl p-1">
+          <View ref={sprintTabSwitcherElement.ref} className="flex-row bg-gray-900 rounded-xl p-1" collapsable={false}>
             <TouchableOpacity
               onPress={() => setActiveTab('start')}
               className={`flex-1 py-3 px-4 rounded-lg ${
@@ -952,18 +1077,20 @@ export default function SprintsTab() {
                 Start Sprint
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('history')}
-              className={`flex-1 py-3 px-4 rounded-lg ${
-                activeTab === 'history' ? 'bg-blue-500' : 'bg-transparent'
-              }`}
-            >
-              <Text className={`text-center font-semibold ${
-                activeTab === 'history' ? 'text-white' : 'text-gray-400'
-              }`}>
-                Recent Sprints
-              </Text>
-            </TouchableOpacity>
+            <View ref={recentSprintsTabElement.ref} className="flex-1" collapsable={false}>
+              <TouchableOpacity
+                onPress={() => setActiveTab('history')}
+                className={`flex-1 py-3 px-4 rounded-lg ${
+                  activeTab === 'history' ? 'bg-blue-500' : 'bg-transparent'
+                }`}
+              >
+                <Text className={`text-center font-semibold ${
+                  activeTab === 'history' ? 'text-white' : 'text-gray-400'
+                }`}>
+                  Recent Sprints
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -971,7 +1098,7 @@ export default function SprintsTab() {
         {activeTab === 'start' ? (
           /* Start Sprint Tab - My Circles */
           <View className="flex-1">
-            <View className="p-4 pb-2" ref={circleHeaderElement.ref} collapsable={false}>
+            <View className="p-4 pb-2">
               <Text className="text-white text-lg font-semibold">Choose a Circle</Text>
               <Text className="text-gray-400 text-sm mt-1">Select where you want to start your sprint</Text>
             </View>
@@ -1067,31 +1194,36 @@ export default function SprintsTab() {
         </View>
       )}
       
-      {/* Tab Bar Reference - positioned at bottom */}
+      {/* Tab Bar References - positioned at bottom */}
+      {/* Circles tab (inbox) - icon area only */}
+      <View 
+        style={{ 
+          position: 'absolute', 
+          bottom: 34, // Raised a little higher to align with icon
+          left: (screenWidth * 0.375) - 22, // Center of second tab minus half icon width
+          width: 44, // Icon size plus padding
+          height: 44, // Icon size plus padding
+          pointerEvents: 'none' 
+        }} 
+        ref={circlesTabElement.ref}
+        collapsable={false}
+      />
+      
+
+      
+      {/* Full tab bar */}
       <View 
         style={{ 
           position: 'absolute', 
           bottom: 0, 
           left: 0, 
-          right: 0, 
+          right: 0,
           height: 80,
-          flexDirection: 'row',
           pointerEvents: 'none' 
         }} 
-      >
-        {/* Friends tab position (first visible tab) */}
-        <View 
-          ref={tabBarElement.ref}
-          collapsable={false}
-          style={{ 
-            flex: 1,
-            height: 80,
-          }} 
-        />
-        <View style={{ flex: 1 }} />
-        <View style={{ flex: 1 }} />
-        <View style={{ flex: 1 }} />
-      </View>
+        ref={tabBarElement.ref}
+        collapsable={false}
+      />
     </SafeAreaView>
     </GestureHandlerRootView>
   );

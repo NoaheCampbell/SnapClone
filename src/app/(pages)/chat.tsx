@@ -5,6 +5,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather } from '@expo/vector-icons'
 import { router, useLocalSearchParams, useRouter } from 'expo-router'
 import { supabase } from '../../../lib/supabase'
+import { useTutorial } from '../../contexts/TutorialContext'
+import { circleChatSteps } from '../../utils/tutorialSteps'
+import { useTutorialElement } from '../../hooks/useTutorialElement'
 import * as ImagePicker from 'expo-image-picker'
 import { Video, ResizeMode } from 'expo-av'
 import { decode } from 'base64-arraybuffer'
@@ -477,7 +480,6 @@ export default function ChatScreen() {
   const [reactionsMap, setReactionsMap] = useState<Record<number, {emoji:string; user_id:string}[]>>({})
   const [joinedSprints, setJoinedSprints] = useState<string[]>([])
 
-
   const [showJoinCamera, setShowJoinCamera] = useState(false)
   const [joinSprintData, setJoinSprintData] = useState<{
     sprintId: string;
@@ -486,6 +488,21 @@ export default function ChatScreen() {
     username: string;
   } | null>(null)
   const [participantAvatars, setParticipantAvatars] = useState<Record<string, string[]>>({})
+
+  // Tutorial setup
+  const { checkAndStartTutorial, progress } = useTutorial();
+  const [elementPositions, setElementPositions] = useState<Record<string, any>>({});
+  
+  // Tutorial element registration callback
+  const handleElementMeasure = useCallback((stepId: string, position: any) => {
+    setElementPositions(prev => ({ ...prev, [stepId]: position }));
+  }, []);
+  
+  // Tutorial element refs - these will be measured and positioned
+  const chatHeaderElement = useTutorialElement('chat-1', handleElementMeasure, []);
+  const sprintMessageElement = useTutorialElement('chat-2', handleElementMeasure, []);
+  const messageInputElement = useTutorialElement('chat-3', handleElementMeasure, []);
+  const threadCountElement = useTutorialElement('chat-4', handleElementMeasure, []);
 
   const [threadCounts, setThreadCounts] = useState<Record<number, number>>({})
   const messagesRef = useRef<Message[]>([])
@@ -825,6 +842,46 @@ export default function ChatScreen() {
       }
     }
   }, [channelId])
+
+  // Start chat tutorial when entering a circle for the first time
+  useEffect(() => {
+    if (!loading && messages.length > 0 && !progress.hasSeenCircleChat && Object.keys(elementPositions).length >= 3) {
+      // Find a sprint message to highlight (if available)
+      const sprintMessage = messages.find(m => m.sprint_id);
+      
+      // Define chat tutorial steps with positions
+      const chatStepsWithPositions = circleChatSteps.map(step => {
+        const baseStep = {
+          ...step,
+          targetElement: elementPositions[step.id] || null,
+          highlightColor: '#10B981',
+        };
+        
+        // For sprint message step, try to use actual sprint message position
+        if (step.id === 'chat-2' && sprintMessage) {
+          // This would need more complex positioning based on message list
+          // For now, use the general message area
+        }
+        
+        return baseStep;
+      });
+
+      // Don't add a final step here - let the tutorial complete naturally
+      // The friends tutorial will start when user navigates to Friends tab
+      checkAndStartTutorial('circleChat', chatStepsWithPositions);
+    }
+  }, [loading, messages.length, progress.hasSeenCircleChat, elementPositions]);
+
+  // Measure tutorial elements after component mounts
+  useEffect(() => {
+    if (channelId) {
+      setTimeout(() => {
+        chatHeaderElement.measure();
+        messageInputElement.measure();
+        // Note: sprintMessageElement and threadCountElement will be measured dynamically when messages load
+      }, 500);
+    }
+  }, [channelId, chatHeaderElement, messageInputElement]);
 
   useEffect(() => {
     if (messages.length === 0) return
@@ -1644,7 +1701,11 @@ export default function ChatScreen() {
   return (
     <SafeAreaView className="flex-1 bg-black">
       {/* Header */}
-      <View className="flex-row items-center p-4 border-b border-gray-800">
+      <View 
+        ref={chatHeaderElement.ref}
+        className="flex-row items-center p-4 border-b border-gray-800"
+        collapsable={false}
+      >
         <TouchableOpacity onPress={() => router.back()} className="mr-4">
           <Feather name="arrow-left" size={24} color="white" />
         </TouchableOpacity>
@@ -1741,7 +1802,11 @@ export default function ChatScreen() {
               <Feather name="image" size={22} color="white" />
             </TouchableOpacity>
 
-            <View className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-3 mr-3 min-h-[44px]">
+            <View 
+              ref={messageInputElement.ref}
+              className="flex-1 flex-row items-center bg-gray-800 rounded-full px-4 py-3 mr-3 min-h-[44px]"
+              collapsable={false}
+            >
               <TextInput
                 value={newMessage}
                 onChangeText={(text) => {

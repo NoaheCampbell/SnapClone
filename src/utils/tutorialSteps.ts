@@ -1,44 +1,60 @@
 import { TutorialStep } from '../components/Tutorial/TutorialOverlay';
 import { router } from 'expo-router';
 
-export const welcomeTutorialSteps: TutorialStep[] = [
+// Extended interface for tutorial steps that will be transformed
+interface RawTutorialStep extends Omit<TutorialStep, 'targetElement'> {
+  highlightElement: string | null;
+  position: 'top' | 'bottom' | 'left' | 'right' | 'center';
+  targetX: number;
+  targetY: number;
+}
+
+export const welcomeTutorialSteps: RawTutorialStep[] = [
   {
     id: 'welcome-1',
-    title: 'Welcome to SprintLoop! 🚀',
-    description: 'SprintLoop helps you stay accountable with timed study sessions in groups. Let\'s show you how it works!',
-    tooltipPosition: 'center',
-    highlightColor: '#10B981', // Green theme throughout
+    title: 'Welcome to SprintLoop! 🎉',
+    description: 'Your social study companion. Complete focused study sessions with friends and stay motivated together!',
+    highlightElement: null,
+    position: 'center',
+    targetX: 0,
+    targetY: 0,
   },
   {
     id: 'welcome-2',
-    title: 'Meet Sprints ⏰',
-    description: 'Sprints are focused study sessions with timers. Take a photo to start, study with friends, then take a quiz to test your knowledge!',
-    tooltipPosition: 'center',
-    highlightColor: '#10B981', // Green theme throughout
+    title: 'Study Sprints 🏃‍♂️',
+    description: 'Create timed study sessions called "Sprints". Set a timer, stay focused, and take a photo to prove you completed it!',
+    highlightElement: 'sprintButton',
+    position: 'top',
+    targetX: 0,
+    targetY: 250,
   },
   {
     id: 'welcome-3',
     title: 'Your Study Streak 🔥',
     description: 'Keep your streak alive by completing at least one sprint daily! You must finish the full timer AND take the quiz to count. Miss a day? Use freeze tokens to protect your streak!',
-    // targetElement will be set dynamically when component mounts
-    tooltipPosition: 'bottom',
-    highlightColor: '#10B981', // Green color to match the navigation highlight
+    highlightElement: 'streakSection',
+    position: 'bottom',
+    targetX: 0,
+    targetY: 350,
   },
   {
     id: 'welcome-4',
     title: 'Study Circles 👥',
-    description: 'Circles are your study groups! Select a circle to create a sprint. Don\'t have any yet? Let\'s create one!',
-    // targetElement will be set dynamically
-    tooltipPosition: 'bottom',
-    highlightColor: '#10B981', // Green color for consistency
+    description: 'Join or create "Circles" - study groups where you can complete sprints together, chat, and motivate each other! Tap the Circles tab to explore!',
+    highlightElement: 'circlesTab',
+    position: 'top',
+    targetX: 0,
+    targetY: 600,
+    requiresInteraction: true,
   },
   {
     id: 'welcome-5',
     title: 'Navigate SprintLoop 🧭',
-    description: 'Use these tabs to access your Circles (chat), Friends (social), and Settings. Tap the Friends tab to create your first circle!',
-    // targetElement will be set dynamically
-    tooltipPosition: 'top',
-    highlightColor: '#10B981', // Green to draw attention
+    description: 'Use the tabs below to navigate between Sprints, Circles (chat), Friends (social), and Settings.',
+    highlightElement: 'tabBar',
+    position: 'top',
+    targetX: 0,
+    targetY: 600,
   },
 ];
 
@@ -142,29 +158,81 @@ export const circleChatSteps: TutorialStep[] = [
     // targetElement will be set dynamically
     tooltipPosition: 'right',
   },
+  {
+    id: 'chat-5',
+    title: 'Ready to Find Study Buddies! 👥',
+    description: 'Great job! You\'ve mastered circle chats. After finishing this tutorial, head to the Friends tab to discover study partners and join more circles!',
+    tooltipPosition: 'center',
+  },
 ];
 
 export const friendsDiscoverySteps: TutorialStep[] = [
   {
     id: 'friends-1',
-    title: 'Find Study Buddies',
-    description: 'Search for friends by username and send friend requests. Friends can invite you to their circles!',
+    title: 'Find Study Buddies 🔍',
+    description: 'Tap the search button to find friends by username. Send friend requests to connect and study together!',
     // targetElement will be set dynamically
     tooltipPosition: 'bottom',
   },
   {
     id: 'friends-2',
-    title: 'Discover Study Groups',
-    description: 'Switch to \'Circles\' to find public study groups you can join based on your interests.',
+    title: 'AI-Powered Circle Discovery 🤖',
+    description: 'Now let\'s explore AI-powered study group suggestions! Tap "Discover Circles" to see circles that match your interests.',
+    // targetElement will be set dynamically
+    tooltipPosition: 'bottom',
+    requiresInteraction: true,
+    onTargetPress: () => {
+      // This will be handled in the friends screen
+    }
+  },
+  {
+    id: 'friends-3',
+    title: 'Smart Circle Matching 🎯',
+    description: 'Each suggestion shows why it\'s a good match for you. Tap "Join" to become part of circles that align with your study goals!',
+    // targetElement will be set dynamically
+    tooltipPosition: 'left',
+  },
+  {
+    id: 'friends-4',
+    title: 'Refresh for More 🔄',
+    description: 'Tap the refresh button to get new AI-powered suggestions based on your latest activity. The more you study, the better the recommendations!',
+    // targetElement will be set dynamically
+    tooltipPosition: 'bottom',
+  },
+];
+
+export const sprintTabsTutorialSteps: TutorialStep[] = [
+  {
+    id: 'sprint-tabs-1',
+    title: 'Choose Your Mode 🎯',
+    description: 'Use "Start Sprint" to create a new focused study session. Switch to "Recent Sprints" to see active and completed sprints from your circles.',
     // targetElement will be set dynamically
     tooltipPosition: 'bottom',
   },
   {
-    id: 'friends-3',
-    title: 'Join the Community',
-    description: 'Tap \'Join\' to become part of a public study circle. Great for finding accountability partners!',
+    id: 'sprint-tabs-2',
+    title: 'Start a Sprint 🚀',
+    description: 'Select any of your circles to begin a new sprint. Each circle has its own sprint duration and community!',
     // targetElement will be set dynamically
-    tooltipPosition: 'left',
+    tooltipPosition: 'top',
+  },
+  {
+    id: 'sprint-tabs-3',
+    title: 'View Active Sprints 👀',
+    description: 'Switch to "Recent Sprints" to see what your friends are studying right now. Tap the Recent Sprints tab!',
+    // targetElement will be set dynamically
+    tooltipPosition: 'bottom',
+    requiresInteraction: true,
+    onTargetPress: () => {
+      // This will be handled in the sprints screen
+    }
+  },
+  {
+    id: 'sprint-tabs-4',
+    title: 'Sprint Actions 🎬',
+    description: 'For active sprints, you can join to study together. For completed sprints, view the quiz results or concept map to learn from others!',
+    // targetElement will be set dynamically
+    tooltipPosition: 'right',
   },
 ];
 

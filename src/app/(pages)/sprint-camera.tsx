@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import SprintCamera from '../../components/SprintCamera';
@@ -6,6 +6,9 @@ import { supabase } from '../../../lib/supabase';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTutorial } from '../../contexts/TutorialContext';
+import { sprintCameraSteps } from '../../utils/tutorialSteps';
+import { useTutorialElement } from '../../hooks/useTutorialElement';
 
 // Function to generate quiz for sprint (moved from create-sprint.tsx)
 const generateQuizForSprint = async (sprintId: string, topic: string, goals: string, questionCount: number) => {
@@ -86,6 +89,9 @@ const generateQuizForSprint = async (sprintId: string, topic: string, goals: str
 export default function SprintCameraPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { checkAndStartTutorial, progress } = useTutorial();
+  const [elementPositions, setElementPositions] = useState<Record<string, any>>({});
+  
   const params = useLocalSearchParams<{ 
     sprintId?: string; 
     isNewSprint?: string;
@@ -95,6 +101,28 @@ export default function SprintCameraPage() {
     duration?: string;
     questionCount?: string;
   }>();
+
+  // Tutorial element registration callback
+  const handleElementMeasure = useCallback((stepId: string, position: any) => {
+    setElementPositions(prev => ({ ...prev, [stepId]: position }));
+  }, []);
+
+  // Tutorial element refs
+  const cameraElement = useTutorialElement('camera-1', handleElementMeasure, []);
+  
+  // Start camera tutorial for new sprints
+  useEffect(() => {
+    if (params.isNewSprint === 'true' && !progress.hasSeenSprintCamera && Object.keys(elementPositions).length >= 1) {
+      // Define camera tutorial steps with positions
+      const cameraStepsWithPositions = sprintCameraSteps.map(step => ({
+        ...step,
+        targetElement: elementPositions[step.id] || null,
+        highlightColor: '#10B981',
+      }));
+      
+      checkAndStartTutorial('sprintCamera', cameraStepsWithPositions);
+    }
+  }, [params.isNewSprint, progress.hasSeenSprintCamera, elementPositions]);
 
   const uploadSprintPhoto = async (photoUri: string, sprintId: string) => {
     try {
@@ -264,6 +292,10 @@ export default function SprintCameraPage() {
       <SprintCamera
         onCapture={handleCapture}
         onCancel={handleCancel}
+        tutorialElementRefs={{
+          cameraElement: cameraElement.ref,
+        }}
+        onElementMeasure={handleElementMeasure}
       />
     </View>
   );

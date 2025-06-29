@@ -6,8 +6,10 @@ import { useAuth } from './AuthContext';
 interface TutorialProgress {
   hasSeenWelcome: boolean;
   hasSeenSprintCreation: boolean;
+  hasSeenSprintCamera: boolean;
   hasSeenCircleChat: boolean;
   hasSeenFriendsDiscovery: boolean;
+  hasSeenSprintTabs: boolean;
   hasSeenAdvancedFeatures: boolean;
   tutorialVersion: string;
   completedSteps: string[];
@@ -21,6 +23,7 @@ interface TutorialContextType {
   currentStep: number;
   tutorialSteps: TutorialStep[];
   progress: TutorialProgress;
+  tutorialQueue: string[]; // Queue of tutorials to show
   
   // Tutorial actions
   startTutorial: (tutorialId: string, steps: TutorialStep[]) => void;
@@ -30,6 +33,9 @@ interface TutorialContextType {
   completeTutorial: () => void;
   resetTutorials: () => void;
   checkAndStartTutorial: (tutorialId: string, steps: TutorialStep[]) => boolean;
+  queueNextTutorial: (tutorialId: string) => void;
+  checkAndStartNextQueuedTutorial: () => void;
+  hasQueuedTutorial: (tutorialId: string) => boolean;
 }
 
 const TUTORIAL_STORAGE_KEY_PREFIX = '@sprintloop_tutorial_progress_';
@@ -38,8 +44,10 @@ const CURRENT_TUTORIAL_VERSION = '1.0';
 const defaultProgress: TutorialProgress = {
   hasSeenWelcome: false,
   hasSeenSprintCreation: false,
+  hasSeenSprintCamera: false,
   hasSeenCircleChat: false,
   hasSeenFriendsDiscovery: false,
+  hasSeenSprintTabs: false,
   hasSeenAdvancedFeatures: false,
   tutorialVersion: CURRENT_TUTORIAL_VERSION,
   completedSteps: [],
@@ -54,14 +62,13 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [tutorialSteps, setTutorialSteps] = useState<TutorialStep[]>([]);
   const [progress, setProgress] = useState<TutorialProgress>(defaultProgress);
+  const [tutorialQueue, setTutorialQueue] = useState<string[]>([]);
 
   // Load progress when user changes
   useEffect(() => {
     if (user) {
-      console.log('[Tutorial Context] User changed, loading tutorial progress for:', user.id);
       loadProgress();
     } else {
-      console.log('[Tutorial Context] No user, resetting to default progress');
       setProgress(defaultProgress);
     }
   }, [user?.id]);
@@ -83,13 +90,11 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
 
       const storageKey = getStorageKey();
       if (!storageKey) {
-        console.log('[Tutorial Context] No storage key (no user), using default progress');
         setProgress(defaultProgress);
         return;
       }
 
       const savedProgress = await AsyncStorage.getItem(storageKey);
-      console.log('[Tutorial Context] Loaded progress:', savedProgress);
       
       if (savedProgress) {
         const parsed = JSON.parse(savedProgress);
@@ -105,7 +110,6 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
           setProgress(parsed);
         }
       } else {
-        console.log('[Tutorial Context] No saved progress, using default');
         setProgress(defaultProgress);
       }
     } catch (error) {
@@ -137,26 +141,22 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
   };
 
   const checkAndStartTutorial = (tutorialId: string, steps: TutorialStep[]): boolean => {
-    console.log('[Tutorial Context] checkAndStartTutorial called:', { tutorialId, stepsCount: steps.length });
-    
     // Check if this tutorial has been seen
     const hasSeenMap: Record<string, boolean> = {
       welcome: progress.hasSeenWelcome,
       sprintCreation: progress.hasSeenSprintCreation,
+      sprintCamera: progress.hasSeenSprintCamera,
       circleChat: progress.hasSeenCircleChat,
       friendsDiscovery: progress.hasSeenFriendsDiscovery,
+      sprintTabs: progress.hasSeenSprintTabs,
       advancedFeatures: progress.hasSeenAdvancedFeatures,
     };
-
-    console.log('[Tutorial Context] Has seen map:', hasSeenMap);
-    console.log('[Tutorial Context] Has seen this tutorial?', hasSeenMap[tutorialId]);
 
     if (!hasSeenMap[tutorialId]) {
       console.log('[Tutorial Context] Starting tutorial:', tutorialId);
       startTutorial(tutorialId, steps);
       return true;
     }
-    console.log('[Tutorial Context] Tutorial already seen:', tutorialId);
     return false;
   };
 
@@ -189,8 +189,33 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     setTutorialSteps([]);
   };
 
+  const queueNextTutorial = (tutorialId: string) => {
+    setTutorialQueue(prev => [...prev, tutorialId]);
+  };
+
+  const checkAndStartNextQueuedTutorial = () => {
+    if (tutorialQueue.length > 0) {
+      const nextTutorial = tutorialQueue[0];
+      setTutorialQueue(prev => prev.slice(1));
+      
+      console.log('[Tutorial Context] Starting queued tutorial:', nextTutorial);
+      
+      // For now, just store that there's a queued tutorial
+      // The actual tutorial will be triggered when the user navigates to the appropriate screen
+      if (nextTutorial === 'friendsDiscovery') {
+        console.log('[Tutorial Context] Friends tutorial queued, will start when user visits Friends tab');
+      }
+    }
+  };
+
+  const hasQueuedTutorial = (tutorialId: string) => {
+    return tutorialQueue.includes(tutorialId);
+  };
+
   const completeTutorial = () => {
     if (!currentTutorial) return;
+
+    console.log('[Tutorial Context] Completing tutorial:', currentTutorial);
 
     // Mark tutorial as completed
     const newProgress = { ...progress };
@@ -201,11 +226,17 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
       case 'sprintCreation':
         newProgress.hasSeenSprintCreation = true;
         break;
+      case 'sprintCamera':
+        newProgress.hasSeenSprintCamera = true;
+        break;
       case 'circleChat':
         newProgress.hasSeenCircleChat = true;
         break;
       case 'friendsDiscovery':
         newProgress.hasSeenFriendsDiscovery = true;
+        break;
+      case 'sprintTabs':
+        newProgress.hasSeenSprintTabs = true;
         break;
       case 'advancedFeatures':
         newProgress.hasSeenAdvancedFeatures = true;
@@ -216,8 +247,27 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
     const allStepIds = tutorialSteps.map(step => step.id);
     newProgress.completedSteps = [...new Set([...progress.completedSteps, ...allStepIds])];
     
+    // Update progress state immediately and save
+    setProgress(newProgress);
     saveProgress(newProgress);
+    
+    const completedTutorial = currentTutorial;
+    
+    // For circle chat/circles navigation tutorial, set a flag to trigger friends tutorial when user navigates to friends tab
+    if (completedTutorial === 'circleChat') {
+      console.log('[Tutorial Context] Circles/Circle chat completed, ready for friends tutorial');
+      console.log('[Tutorial Context] Updated progress:', newProgress);
+      // Set a timestamp so friends screen knows this just happened
+      AsyncStorage.setItem('circleChat_completed_at', Date.now().toString()).catch(error => {
+        console.error('[Tutorial Context] Error saving completion timestamp:', error);
+      });
+    }
+    
+    // Skip tutorial after setting flags
     skipTutorial();
+    
+    // Check if there are more tutorials queued
+    checkAndStartNextQueuedTutorial();
   };
 
   const resetTutorials = async () => {
@@ -236,6 +286,7 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
         currentStep,
         tutorialSteps,
         progress,
+        tutorialQueue,
         startTutorial,
         nextStep,
         previousStep,
@@ -243,6 +294,9 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
         completeTutorial,
         resetTutorials,
         checkAndStartTutorial,
+        queueNextTutorial,
+        checkAndStartNextQueuedTutorial,
+        hasQueuedTutorial,
       }}
     >
       {children}

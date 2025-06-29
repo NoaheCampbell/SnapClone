@@ -23,6 +23,10 @@ interface TextOverlay {
 interface SprintCameraProps {
   onCapture: (uri: string) => void;
   onCancel: () => void;
+  tutorialElementRefs?: {
+    cameraElement?: React.RefObject<View>;
+  };
+  onElementMeasure?: (stepId: string, position: any) => void;
 }
 
 // Draggable text component - moved outside to prevent recreation
@@ -202,7 +206,7 @@ const EditableTextInput = React.memo(({ textOverlay, onFinishEditing, currentEdi
   );
 });
 
-export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps) {
+export default function SprintCamera({ onCapture, onCancel, tutorialElementRefs, onElementMeasure }: SprintCameraProps) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
   const [flashMode, setFlashMode] = useState<'on' | 'off'>('off');
@@ -233,6 +237,19 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
       setHasPermission(status === 'granted');
     })();
   }, []);
+
+  // Measure tutorial elements after component mounts
+  useEffect(() => {
+    if (tutorialElementRefs && onElementMeasure) {
+      setTimeout(() => {
+        if (tutorialElementRefs.cameraElement?.current) {
+          tutorialElementRefs.cameraElement.current.measure?.((x, y, width, height, pageX, pageY) => {
+            onElementMeasure('camera-1', { x: pageX, y: pageY, width, height });
+          });
+        }
+      }, 500); // Delay to ensure camera is ready
+    }
+  }, [tutorialElementRefs, onElementMeasure]);
 
   const addTextOverlay = () => {
     const newText: TextOverlay = {
@@ -496,7 +513,11 @@ export default function SprintCamera({ onCapture, onCancel }: SprintCameraProps)
   return (
     <>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <View ref={containerRef} collapsable={false} style={{ flex: 1, backgroundColor: 'black' }}>
+        <View 
+          ref={tutorialElementRefs?.cameraElement || containerRef} 
+          collapsable={false} 
+          style={{ flex: 1, backgroundColor: 'black' }}
+        >
           <GestureDetector gesture={backgroundTapGesture}>
             <View style={{ flex: 1 }}>
               {/* Capture Area - only this content will be captured */}

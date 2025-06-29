@@ -8,8 +8,9 @@ import {
   Dimensions,
   StatusBar,
   Platform,
+  TouchableWithoutFeedback,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -27,6 +28,8 @@ export interface TutorialStep {
   tooltipPosition?: 'top' | 'bottom' | 'left' | 'right' | 'center';
   action?: () => void; // Optional action to perform when this step is shown
   highlightColor?: string;
+  requiresInteraction?: boolean; // If true, user must click the highlighted area
+  onTargetPress?: () => void; // Called when user clicks the highlighted area
 }
 
 interface TutorialOverlayProps {
@@ -52,6 +55,9 @@ export default function TutorialOverlay({
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const pulseAnim = useRef(new Animated.Value(0.3)).current;
   const pulseScaleAnim = useRef(new Animated.Value(1)).current;
+  const insets = useSafeAreaInsets();
+  
+  const [tooltipLayout, setTooltipLayout] = useState<{ width: number; height: number } | null>(null);
 
   const currentTutorialStep = steps[currentStep];
   const isLastStep = currentStep === steps.length - 1;
@@ -133,16 +139,19 @@ export default function TutorialOverlay({
 
     const { x, y, width, height } = currentTutorialStep.targetElement;
     const tooltipPosition = currentTutorialStep.tooltipPosition || 'bottom';
+    
+    // Add safe area insets back since we subtracted them during measurement
+    const adjustedY = y + insets.top;
 
     // Calculate center points of target element
     const targetCenterX = x + width / 2;
-    const targetCenterY = y + height / 2;
+    const targetCenterY = adjustedY + height / 2;
 
     switch (tooltipPosition) {
       case 'top':
         // Position above the element
         return {
-          bottom: screenHeight - y + arrowSize,
+          bottom: screenHeight - adjustedY + arrowSize,
           left: Math.max(
             tooltipPadding, 
             Math.min(
@@ -155,7 +164,7 @@ export default function TutorialOverlay({
       case 'bottom':
         // Position below the element
         return {
-          top: y + height + arrowSize,
+          top: adjustedY + height + arrowSize,
           left: Math.max(
             tooltipPadding,
             Math.min(
@@ -189,11 +198,96 @@ export default function TutorialOverlay({
     }
   };
 
+  const getArrowPosition = () => {
+    if (!currentTutorialStep.targetElement || !tooltipLayout || currentTutorialStep.tooltipPosition === 'center') {
+      return null;
+    }
+
+    const { x, y, width, height } = currentTutorialStep.targetElement;
+    const tooltipPosition = currentTutorialStep.tooltipPosition || 'bottom';
+    const tooltipPos = getTooltipPosition();
+    
+    // Add safe area insets back since we subtracted them during measurement
+    const adjustedY = y + insets.top;
+    
+    // Calculate center of target element
+    const targetCenterX = x + width / 2;
+    const targetCenterY = adjustedY + height / 2;
+    
+    // Calculate tooltip position
+    let tooltipLeft = 0;
+    let tooltipTop = 0;
+    
+    if ('left' in tooltipPos) {
+      tooltipLeft = tooltipPos.left as number;
+    } else if ('right' in tooltipPos) {
+      tooltipLeft = screenWidth - (tooltipPos.right as number) - tooltipLayout.width;
+    }
+    
+    if ('top' in tooltipPos) {
+      tooltipTop = tooltipPos.top as number;
+    } else if ('bottom' in tooltipPos) {
+      tooltipTop = screenHeight - (tooltipPos.bottom as number) - tooltipLayout.height;
+    }
+
+    switch (tooltipPosition) {
+      case 'bottom':
+        return {
+          top: -10,
+          left: Math.max(10, Math.min(targetCenterX - tooltipLeft - 10, tooltipLayout.width - 20)),
+          borderLeftWidth: 10,
+          borderRightWidth: 10,
+          borderBottomWidth: 10,
+          borderLeftColor: 'transparent',
+          borderRightColor: 'transparent',
+          borderBottomColor: 'white',
+        };
+      case 'top':
+        return {
+          bottom: -10,
+          left: Math.max(10, Math.min(targetCenterX - tooltipLeft - 10, tooltipLayout.width - 20)),
+          borderLeftWidth: 10,
+          borderRightWidth: 10,
+          borderTopWidth: 10,
+          borderLeftColor: 'transparent',
+          borderRightColor: 'transparent',
+          borderTopColor: 'white',
+        };
+      case 'right':
+        return {
+          left: -10,
+          top: Math.max(10, Math.min(targetCenterY - tooltipTop - 10, tooltipLayout.height - 20)),
+          borderTopWidth: 10,
+          borderBottomWidth: 10,
+          borderRightWidth: 10,
+          borderTopColor: 'transparent',
+          borderBottomColor: 'transparent',
+          borderRightColor: 'white',
+        };
+      case 'left':
+        return {
+          right: -10,
+          top: Math.max(10, Math.min(targetCenterY - tooltipTop - 10, tooltipLayout.height - 20)),
+          borderTopWidth: 10,
+          borderBottomWidth: 10,
+          borderLeftWidth: 10,
+          borderTopColor: 'transparent',
+          borderBottomColor: 'transparent',
+          borderLeftColor: 'white',
+        };
+      default:
+        return null;
+    }
+  };
+
   const renderHighlight = () => {
     if (!currentTutorialStep.targetElement) return null;
 
     const { x, y, width, height } = currentTutorialStep.targetElement;
     const highlightColor = currentTutorialStep.highlightColor || '#3B82F6';
+    
+    // Add safe area insets back since we subtracted them during measurement
+    const adjustedY = y + insets.top;
 
     return (
       <>
@@ -202,7 +296,7 @@ export default function TutorialOverlay({
           style={{
             position: 'absolute',
             left: x - 12,
-            top: y - 12,
+            top: adjustedY - 12,
             width: width + 24,
             height: height + 24,
             borderRadius: 16,
@@ -220,7 +314,7 @@ export default function TutorialOverlay({
           style={{
             position: 'absolute',
             left: x - 8,
-            top: y - 8,
+            top: adjustedY - 8,
             width: width + 16,
             height: height + 16,
             borderRadius: 12,
@@ -234,7 +328,7 @@ export default function TutorialOverlay({
           style={{
             position: 'absolute',
             left: x - 4,
-            top: y - 4,
+            top: adjustedY - 4,
             width: width + 8,
             height: height + 8,
             borderRadius: 8,
@@ -249,7 +343,7 @@ export default function TutorialOverlay({
           style={{
             position: 'absolute',
             left: x - 4,
-            top: y - 4,
+            top: adjustedY - 4,
             width: width + 8,
             height: height + 8,
             borderRadius: 8,
@@ -265,57 +359,93 @@ export default function TutorialOverlay({
 
   const renderOverlay = () => {
     if (!currentTutorialStep.targetElement) {
-      return <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />;
+      return (
+        <TouchableWithoutFeedback onPress={() => {}}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />
+        </TouchableWithoutFeedback>
+      );
     }
 
     const { x, y, width, height } = currentTutorialStep.targetElement;
+    // Add safe area insets back since we subtracted them during measurement
+    const adjustedY = y + insets.top;
 
     return (
       <>
-        {/* Top overlay */}
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: y,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          }}
-        />
-        {/* Left overlay */}
-        <View
-          style={{
-            position: 'absolute',
-            top: y,
-            left: 0,
-            width: x,
-            height: height,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          }}
-        />
-        {/* Right overlay */}
-        <View
-          style={{
-            position: 'absolute',
-            top: y,
-            left: x + width,
-            right: 0,
-            height: height,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          }}
-        />
-        {/* Bottom overlay */}
-        <View
-          style={{
-            position: 'absolute',
-            top: y + height,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          }}
-        />
+        {/* Blocking overlay sections */}
+        <TouchableWithoutFeedback onPress={() => {}}>
+          <View>
+            {/* Top overlay */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: adjustedY,
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              }}
+            />
+            {/* Left overlay */}
+            <View
+              style={{
+                position: 'absolute',
+                top: adjustedY,
+                left: 0,
+                width: x,
+                height: height,
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              }}
+            />
+            {/* Right overlay */}
+            <View
+              style={{
+                position: 'absolute',
+                top: adjustedY,
+                left: x + width,
+                right: 0,
+                height: height,
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              }}
+            />
+            {/* Bottom overlay */}
+            <View
+              style={{
+                position: 'absolute',
+                top: adjustedY + height,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              }}
+            />
+          </View>
+        </TouchableWithoutFeedback>
+        
+        {/* Clickable target area */}
+        {currentTutorialStep.requiresInteraction && (
+          <TouchableOpacity
+            style={{
+              position: 'absolute',
+              left: x,
+              top: adjustedY,
+              width: width,
+              height: height,
+              backgroundColor: 'transparent', // Make it transparent
+              zIndex: 9999,
+            }}
+            onPress={() => {
+              console.log('[Tutorial Debug] Target area clicked!', { x, y: adjustedY, width, height });
+              if (currentTutorialStep.onTargetPress) {
+                console.log('[Tutorial Debug] Calling onTargetPress...');
+                currentTutorialStep.onTargetPress();
+              } else {
+                console.log('[Tutorial Debug] No onTargetPress function found');
+              }
+            }}
+            activeOpacity={0.7}
+          />
+        )}
       </>
     );
   };
@@ -337,60 +467,27 @@ export default function TutorialOverlay({
             },
           ]}
         >
-          <View>
+          <View
+            onLayout={(event) => {
+              const { width, height } = event.nativeEvent.layout;
+              setTooltipLayout({ width, height });
+            }}
+          >
             {/* Arrow pointing to target element */}
-            {currentTutorialStep.targetElement && currentTutorialStep.tooltipPosition !== 'center' && (
-              <View
-                style={{
-                  position: 'absolute',
-                  width: 0,
-                  height: 0,
-                  borderStyle: 'solid',
-                  ...(currentTutorialStep.tooltipPosition === 'bottom' && {
-                    top: -10,
-                    left: '50%',
-                    marginLeft: -10,
-                    borderLeftWidth: 10,
-                    borderRightWidth: 10,
-                    borderBottomWidth: 10,
-                    borderLeftColor: 'transparent',
-                    borderRightColor: 'transparent',
-                    borderBottomColor: 'white',
-                  }),
-                  ...(currentTutorialStep.tooltipPosition === 'top' && {
-                    bottom: -10,
-                    left: '50%',
-                    marginLeft: -10,
-                    borderLeftWidth: 10,
-                    borderRightWidth: 10,
-                    borderTopWidth: 10,
-                    borderLeftColor: 'transparent',
-                    borderRightColor: 'transparent',
-                    borderTopColor: 'white',
-                  }),
-                  ...(currentTutorialStep.tooltipPosition === 'right' && {
-                    left: -10,
-                    top: 30,
-                    borderTopWidth: 10,
-                    borderBottomWidth: 10,
-                    borderRightWidth: 10,
-                    borderTopColor: 'transparent',
-                    borderBottomColor: 'transparent',
-                    borderRightColor: 'white',
-                  }),
-                  ...(currentTutorialStep.tooltipPosition === 'left' && {
-                    right: -10,
-                    top: 30,
-                    borderTopWidth: 10,
-                    borderBottomWidth: 10,
-                    borderLeftWidth: 10,
-                    borderTopColor: 'transparent',
-                    borderBottomColor: 'transparent',
-                    borderLeftColor: 'white',
-                  }),
-                }}
-              />
-            )}
+            {(() => {
+              const arrowStyle = getArrowPosition();
+              return arrowStyle && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    width: 0,
+                    height: 0,
+                    borderStyle: 'solid',
+                    ...arrowStyle,
+                  }}
+                />
+              );
+            })()}
             <View className="bg-white rounded-2xl p-4 shadow-lg" style={{ elevation: 5 }}>
               {/* Progress indicator */}
               <View className="flex-row justify-between items-center mb-2">
@@ -435,14 +532,22 @@ export default function TutorialOverlay({
                   {currentStep + 1} of {steps.length}
                 </Text>
 
-                <TouchableOpacity
-                  onPress={isLastStep ? onComplete : onNext}
-                  className="bg-blue-500 px-4 py-1.5 rounded-lg"
-                >
-                  <Text className="text-white text-sm font-medium">
-                    {isLastStep ? 'Done' : 'Next'}
-                  </Text>
-                </TouchableOpacity>
+                {!currentTutorialStep.requiresInteraction ? (
+                  <TouchableOpacity
+                    onPress={isLastStep ? onComplete : onNext}
+                    className="bg-blue-500 px-4 py-1.5 rounded-lg"
+                  >
+                    <Text className="text-white text-sm font-medium">
+                      {isLastStep ? 'Done' : 'Next'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View className="bg-gray-300 px-4 py-1.5 rounded-lg opacity-50">
+                    <Text className="text-gray-600 text-sm font-medium">
+                      Tap highlighted area
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
