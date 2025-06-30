@@ -31,8 +31,7 @@ serve(async (req) => {
         tags,
         summaries (
           bullets,
-          tags,
-          embedding
+          tags
         )
       `)
       .eq('user_id', userId)
@@ -61,29 +60,8 @@ serve(async (req) => {
     const summaryTags = userSprints.flatMap(s => s.summaries?.tags || [])
     const allUserTags = [...userTags, ...summaryTags].filter(Boolean)
 
-    // Create a representative embedding for the user's interests
-    const userInterestsText = `${userTopics.join(' ')} ${allUserTags.join(' ')}`
-    
-    let userEmbedding = null
-    if (userInterestsText.trim()) {
-      const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-        },
-        body: JSON.stringify({
-          model: 'text-embedding-3-small',
-          input: userInterestsText,
-          dimensions: 1536
-        })
-      })
-
-      if (embeddingResponse.ok) {
-        const embeddingData = await embeddingResponse.json()
-        userEmbedding = embeddingData.data[0].embedding
-      }
-    }
+    // Embedding generation temporarily disabled
+    // TODO: Fix vector embedding handling for similarity scoring
 
     // Get public circles with their recent activity
     const { data: publicCircles, error: publicCirclesError } = await supabase
@@ -100,8 +78,7 @@ serve(async (req) => {
           created_at,
           summaries (
             bullets,
-            tags,
-            embedding
+            tags
           )
         )
       `)
@@ -184,37 +161,9 @@ serve(async (req) => {
           reasons.push(`Common study areas: ${tagOverlap} tag matches`)
         }
 
-        // Vector similarity scoring (if we have embeddings)
-        if (userEmbedding && circle.sprints?.length > 0) {
-          const circleEmbeddings = circle.sprints
-            .map((s: any) => s.summaries?.embedding)
-            .filter(Boolean)
-
-          if (circleEmbeddings.length > 0) {
-            // Calculate average similarity with circle's content
-            const similarities = circleEmbeddings.map((embedding: number[]) => {
-              // Cosine similarity calculation
-              const dotProduct = userEmbedding.reduce((sum: number, val: number, i: number) => 
-                sum + val * embedding[i], 0)
-              const magnitudeA = Math.sqrt(userEmbedding.reduce((sum: number, val: number) => 
-                sum + val * val, 0))
-              const magnitudeB = Math.sqrt(embedding.reduce((sum: number, val: number) => 
-                sum + val * val, 0))
-              return dotProduct / (magnitudeA * magnitudeB)
-            })
-
-            const avgSimilarity = similarities.reduce((sum, sim) => sum + sim, 0) / similarities.length
-            // Lower threshold from 0.7 to 0.5 for more matches
-            if (avgSimilarity > 0.5) {
-              score += avgSimilarity * 20
-              reasons.push(`Content similarity: ${(avgSimilarity * 100).toFixed(1)}% match`)
-            } else if (avgSimilarity > 0.3) {
-              // Give partial credit for moderate similarity
-              score += avgSimilarity * 10
-              reasons.push(`Moderate content similarity: ${(avgSimilarity * 100).toFixed(1)}% match`)
-            }
-          }
-        }
+        // Vector similarity scoring temporarily disabled due to embedding format issues
+        // TODO: Fix vector embedding handling
+        // For now, rely on topic and tag matching which provides good results
 
         // Activity level scoring
         const recentSprints = circle.sprints?.filter((s: any) => 
