@@ -26,10 +26,14 @@ interface TutorialOverlayProps {
 export default function TutorialOverlay({ steps, onComplete, isVisible }: TutorialOverlayProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [targetMeasurements, setTargetMeasurements] = useState<any>(null);
+  const [measurementsReady, setMeasurementsReady] = useState(false);
+  const [tutorialStarted, setTutorialStarted] = useState(false);
+  const [measurementsCache, setMeasurementsCache] = useState<{[key: string]: any}>({});
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const pulseAnim = useRef(new Animated.Value(0.3)).current;
   const pulseScaleAnim = useRef(new Animated.Value(1)).current;
+  const highlightOpacity = useRef(new Animated.Value(0)).current;
 
   // Check if tutorial was already completed
   useEffect(() => {
@@ -40,9 +44,60 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
     });
   }, []);
 
-  // Animate in when visible
+  // Pre-measure all available targets
+  const preMeasureTargets = useCallback(() => {
+    const cache: {[key: string]: any} = {};
+    let measuredCount = 0;
+    let totalToMeasure = 0;
+
+    steps.forEach((step) => {
+      if (step.targetRef?.current && !step.customHighlight) {
+        totalToMeasure++;
+      } else if (step.targetPosition) {
+        cache[step.id] = step.targetPosition;
+      }
+    });
+
+    const checkComplete = () => {
+      measuredCount++;
+      if (measuredCount >= totalToMeasure) {
+        setMeasurementsCache(cache);
+        console.log('Pre-measurement complete:', cache);
+      }
+    };
+
+    steps.forEach((step) => {
+      if (step.targetRef?.current && !step.customHighlight) {
+        try {
+          if (typeof step.targetRef.current.measureInWindow === 'function') {
+            step.targetRef.current.measureInWindow((x: number, y: number, width: number, height: number) => {
+              if (width > 0 && height > 0) {
+                cache[step.id] = { x, y, width, height };
+                console.log('Pre-measured:', step.id, { x, y, width, height });
+              }
+              checkComplete();
+            });
+          } else {
+            checkComplete();
+          }
+        } catch (error) {
+          console.error('Error pre-measuring:', step.id, error);
+          checkComplete();
+        }
+      }
+    });
+
+    // If no measurements needed, set cache immediately
+    if (totalToMeasure === 0) {
+      setMeasurementsCache(cache);
+    }
+  }, [steps]);
+
+  // Animate in when visible and pre-measure targets
   useEffect(() => {
     if (isVisible) {
+      setTutorialStarted(true);
+      
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -54,6 +109,11 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
           useNativeDriver: true,
         }),
       ]).start();
+
+      // Pre-measure all targets
+      setTimeout(() => {
+        preMeasureTargets();
+      }, 100);
 
       // Start pulse animation for highlight
       Animated.loop(
@@ -86,36 +146,98 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
         ])
       ).start();
     } else {
+      setTutorialStarted(false);
+      setMeasurementsCache({});
       fadeAnim.setValue(0);
       scaleAnim.setValue(0.8);
       pulseAnim.setValue(0.3);
       pulseScaleAnim.setValue(1);
+      highlightOpacity.setValue(0);
     }
-  }, [isVisible]);
+  }, [isVisible, preMeasureTargets]);
 
-  // Measure target element when step changes
+  // Update measurements when step changes using cached values
   useEffect(() => {
     const step = steps[currentStep];
     
-    // Reset measurements first
-    setTargetMeasurements(null);
+    console.log('Step changed to:', step.id, 'Cache:', measurementsCache);
     
-    // Small delay to ensure elements are rendered
-    const timer = setTimeout(() => {
-      if (step?.targetRef?.current && !step.customHighlight) {
-        step.targetRef.current.measureInWindow((x: number, y: number, width: number, height: number) => {
-          if (width > 0 && height > 0) {
-            console.log('Measured element:', step.id, { x, y, width, height });
-            setTargetMeasurements({ x, y, width, height });
+    // Check if we have cached measurements for this step
+    const cachedMeasurement = measurementsCache[step.id];
+    
+    if (cachedMeasurement) {
+      // Use cached measurements - instant transition
+      console.log('Using cached measurement for:', step.id, cachedMeasurement);
+      setTargetMeasurements(cachedMeasurement);
+      setMeasurementsReady(true);
+      
+      // Smooth transition to new position
+      Animated.timing(highlightOpacity, {
+        toValue: 1,
+        duration: currentStep === 0 ? 300 : 200,
+        useNativeDriver: true,
+      }).start();
+    } else if (step?.customHighlight) {
+      // No measurements needed for custom highlight steps
+      setTargetMeasurements(null);
+      setMeasurementsReady(true);
+      
+      // Hide highlight for custom steps
+      Animated.timing(highlightOpacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Fallback: try to measure dynamically (for steps not in cache)
+      console.log('No cached measurement, measuring dynamically:', step.id);
+      
+      // Fade out highlight while measuring
+      Animated.timing(highlightOpacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
+      
+      setTargetMeasurements(null);
+      setMeasurementsReady(false);
+      
+      const measureElement = () => {
+        if (step?.targetRef?.current && !step.customHighlight) {
+          try {
+            if (typeof step.targetRef.current.measureInWindow === 'function') {
+              step.targetRef.current.measureInWindow((x: number, y: number, width: number, height: number) => {
+                if (width > 0 && height > 0) {
+                  console.log('Dynamically measured element:', step.id, { x, y, width, height });
+                  setTargetMeasurements({ x, y, width, height });
+                  setMeasurementsReady(true);
+                  // Fade in highlight with new position
+                  Animated.timing(highlightOpacity, {
+                    toValue: 1,
+                    duration: 200,
+                    useNativeDriver: true,
+                  }).start();
+                } else {
+                  console.warn('Invalid measurements for step:', step.id, { x, y, width, height });
+                  setTimeout(measureElement, 10);
+                }
+              });
+            } else {
+              console.warn('measureInWindow not available for step:', step.id);
+              setTargetMeasurements(null);
+              setMeasurementsReady(true);
+            }
+          } catch (error) {
+            console.error('Error measuring element for step:', step.id, error);
+            setTargetMeasurements(null);
+            setMeasurementsReady(true);
           }
-        });
-      } else if (step?.targetPosition) {
-        setTargetMeasurements(step.targetPosition);
-      }
-    }, 300);
-    
-    return () => clearTimeout(timer);
-  }, [currentStep, steps]);
+        }
+      };
+      
+      setTimeout(measureElement, 50);
+    }
+  }, [currentStep, steps, measurementsCache]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -156,136 +278,140 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
   return (
     <Modal transparent visible={isVisible} animationType="none">
       <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
-        {/* Dark overlay with cutout */}
-        {targetMeasurements && !step.customHighlight ? (
-          <>
-            {/* Dark overlay sections */}
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-              {/* Top overlay */}
-              <View
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: targetMeasurements.y - (step.highlightPadding || 12),
-                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                }}
-              />
-              {/* Left overlay */}
-              <View
-                style={{
-                  position: 'absolute',
-                  top: targetMeasurements.y - (step.highlightPadding || 12),
-                  left: 0,
-                  width: targetMeasurements.x - (step.highlightPadding || 12),
-                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2,
-                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                }}
-              />
-              {/* Right overlay */}
-              <View
-                style={{
-                  position: 'absolute',
-                  top: targetMeasurements.y - (step.highlightPadding || 12),
-                  left: targetMeasurements.x + targetMeasurements.width + (step.highlightPadding || 12),
-                  right: 0,
-                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2,
-                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                }}
-              />
-              {/* Bottom overlay */}
-              <View
-                style={{
-                  position: 'absolute',
-                  top: targetMeasurements.y + targetMeasurements.height + (step.highlightPadding || 12),
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                }}
-              />
-            </View>
-            
-            {/* Animated highlight layers */}
-            {/* Outer glow effect */}
-            <Animated.View
-              style={{
-                position: 'absolute',
-                left: targetMeasurements.x - (step.highlightPadding || 12) - 12,
-                top: targetMeasurements.y - (step.highlightPadding || 12) - 12,
-                width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 24,
-                height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 24,
-                borderRadius: 16,
-                backgroundColor: NEON_GREEN,
-                opacity: pulseAnim.interpolate({
-                  inputRange: [0.3, 0.8],
-                  outputRange: [0.2, 0.4],
-                }),
-                transform: [{ scale: pulseScaleAnim }],
-              }}
-            />
-            
-            {/* Middle glow layer */}
-            <View
-              style={{
-                position: 'absolute',
-                left: targetMeasurements.x - (step.highlightPadding || 12) - 8,
-                top: targetMeasurements.y - (step.highlightPadding || 12) - 8,
-                width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 16,
-                height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 16,
-                borderRadius: 12,
-                backgroundColor: NEON_GREEN,
-                opacity: 0.3,
-              }}
-            />
-            
-            {/* Inner border */}
-            <View
-              style={{
-                position: 'absolute',
-                left: targetMeasurements.x - (step.highlightPadding || 12) - 4,
-                top: targetMeasurements.y - (step.highlightPadding || 12) - 4,
-                width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 8,
-                height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
-                borderRadius: 8,
-                borderWidth: 3,
-                borderColor: NEON_GREEN,
-                backgroundColor: 'transparent',
-              }}
-            />
-            
-            {/* Pulsing border overlay */}
-            <Animated.View
-              style={{
-                position: 'absolute',
-                left: targetMeasurements.x - (step.highlightPadding || 12) - 4,
-                top: targetMeasurements.y - (step.highlightPadding || 12) - 4,
-                width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 8,
-                height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
-                borderRadius: 8,
-                borderWidth: 2,
-                borderColor: NEON_GREEN,
-                backgroundColor: 'transparent',
-                opacity: pulseAnim,
-              }}
-            />
-          </>
-        ) : (
-          <View className="absolute inset-0 bg-black/60" />
-        )}
+        {/* Basic dark overlay - always present */}
+        <View className="absolute inset-0 bg-black/60" />
         
-        {/* Tutorial card */}
-        <View 
-          className="absolute left-6 right-6"
-          style={{
-            top: step.placement === 'top' ? 60 : 
-                 step.placement === 'center' ? screenHeight / 2 - 150 :
-                 targetMeasurements && targetMeasurements.y < screenHeight / 2 ? 
-                   targetMeasurements.y + targetMeasurements.height + (step.highlightPadding || 12) + 20 : 
-                   60,
-          }}
-        >
+        {/* Highlight overlay - animated */}
+        <Animated.View style={{ opacity: highlightOpacity, flex: 1 }}>
+          {targetMeasurements && !step.customHighlight && (
+            <>
+              {/* Dark overlay sections with cutout */}
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+                {/* Top overlay */}
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: targetMeasurements.y - (step.highlightPadding || 12),
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  }}
+                />
+                {/* Left overlay */}
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: targetMeasurements.y - (step.highlightPadding || 12),
+                    left: 0,
+                    width: targetMeasurements.x - (step.highlightPadding || 12),
+                    height: targetMeasurements.height + (step.highlightPadding || 12) * 2,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  }}
+                />
+                {/* Right overlay */}
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: targetMeasurements.y - (step.highlightPadding || 12),
+                    left: targetMeasurements.x + targetMeasurements.width + (step.highlightPadding || 12),
+                    right: 0,
+                    height: targetMeasurements.height + (step.highlightPadding || 12) * 2,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  }}
+                />
+                {/* Bottom overlay */}
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: targetMeasurements.y + targetMeasurements.height + (step.highlightPadding || 12),
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  }}
+                />
+              </View>
+              
+              {/* Animated highlight layers */}
+              {/* Outer glow effect */}
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  left: targetMeasurements.x - (step.highlightPadding || 12) - 12,
+                  top: targetMeasurements.y - (step.highlightPadding || 12) - 12,
+                  width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 24,
+                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 24,
+                  borderRadius: 16,
+                  backgroundColor: NEON_GREEN,
+                  opacity: pulseAnim.interpolate({
+                    inputRange: [0.3, 0.8],
+                    outputRange: [0.2, 0.4],
+                  }),
+                  transform: [{ scale: pulseScaleAnim }],
+                }}
+              />
+              
+              {/* Middle glow layer */}
+              <View
+                style={{
+                  position: 'absolute',
+                  left: targetMeasurements.x - (step.highlightPadding || 12) - 8,
+                  top: targetMeasurements.y - (step.highlightPadding || 12) - 8,
+                  width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 16,
+                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 16,
+                  borderRadius: 12,
+                  backgroundColor: NEON_GREEN,
+                  opacity: 0.3,
+                }}
+              />
+              
+              {/* Inner border */}
+              <View
+                style={{
+                  position: 'absolute',
+                  left: targetMeasurements.x - (step.highlightPadding || 12) - 4,
+                  top: targetMeasurements.y - (step.highlightPadding || 12) - 4,
+                  width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 8,
+                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
+                  borderRadius: 8,
+                  borderWidth: 3,
+                  borderColor: NEON_GREEN,
+                  backgroundColor: 'transparent',
+                }}
+              />
+              
+              {/* Pulsing border overlay */}
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  left: targetMeasurements.x - (step.highlightPadding || 12) - 4,
+                  top: targetMeasurements.y - (step.highlightPadding || 12) - 4,
+                  width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 8,
+                  height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
+                  borderRadius: 8,
+                  borderWidth: 2,
+                  borderColor: NEON_GREEN,
+                  backgroundColor: 'transparent',
+                  opacity: pulseAnim,
+                }}
+              />
+            </>
+          )}
+        </Animated.View>
+        
+        {/* Tutorial card - always show once tutorial starts */}
+        {tutorialStarted && (
+          <View 
+            className="absolute left-6 right-6"
+            style={{
+              top: step.placement === 'top' ? 60 : 
+                   step.placement === 'center' ? screenHeight / 2 - 150 :
+                   targetMeasurements && targetMeasurements.y < screenHeight / 2 ? 
+                     targetMeasurements.y + targetMeasurements.height + (step.highlightPadding || 12) + 20 : 
+                     60,
+            }}
+          >
           <View className="bg-white rounded-2xl shadow-lg" style={{ maxWidth: 400 }}>
             {/* Header with Progress dots and Skip */}
             <View className="flex-row justify-between items-center px-5 pt-4 pb-1">
@@ -352,7 +478,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
               </View>
               
               {/* Tap highlighted area text - only show when there's a highlight */}
-              {targetMeasurements && !step.customHighlight && (
+              {measurementsReady && targetMeasurements && !step.customHighlight && (
                 <Text className="text-gray-400 text-sm text-center mt-3">
                   Tap highlighted area
                 </Text>
@@ -360,6 +486,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
             </View>
           </View>
         </View>
+        )}
       </Animated.View>
           </Modal>
     );

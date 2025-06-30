@@ -25,6 +25,7 @@ export function useTutorial() {
   const startSprintRef = useRef(null);
   const sprintListRef = useRef(null);
   const circlesRef = useRef(null);
+  const recentSprintsTabRef = useRef(null);
   
   // Get tab refs from context (will be null if not in tabs layout)
   let tabRefs: any = { 
@@ -98,10 +99,10 @@ export function useTutorial() {
     {
       id: 'active-sprints',
       title: 'Active Sprints Feed 📚',
-      description: 'See what others in your circles are studying right now. You can join their sprints or get inspired for your own topics.',
-      targetRef: sprintListRef,
-      placement: 'top',
-      highlightPadding: 10,
+      description: 'See what others in your circles are studying right now. Tap "Recent Sprints" to view active and completed sprints.',
+      targetRef: recentSprintsTabRef,
+      placement: 'bottom',
+      highlightPadding: 8,
     },
     {
       id: 'circles',
@@ -156,6 +157,7 @@ export function useTutorial() {
       startSprintRef,
       sprintListRef,
       circlesRef,
+      recentSprintsTabRef,
       friendsTabRef: tabRefs.friendsTabRef,
       inboxTabRef: tabRefs.inboxTabRef,
       sprintsTabRef: tabRefs.sprintsTabRef,

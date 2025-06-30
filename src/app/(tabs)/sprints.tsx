@@ -830,14 +830,14 @@ export default function SprintsTab() {
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
           <Text className="text-gray-400 text-sm">Focus together with your circles</Text>
-          <View className="flex-row items-center mt-1 space-x-4" ref={refs.streakRef}>
+          <View className="flex-row items-center mt-1 space-x-4">
             <View className="flex-row items-center">
               <Feather name="zap" size={16} color="#FBBF24" />
-              <Text className="text-yellow-400 text-sm ml-1">{userStreak.current_len} day streak</Text>
-            </View>
-            <View className="flex-row items-center">
-              <Feather name="gift" size={16} color="#93C5FD" />
-              <Text className="text-blue-300 text-sm ml-1">{userStreak.freeze_tokens} tokens</Text>
+              <View ref={refs.streakRef} className="flex-row items-center space-x-4" style={{ marginLeft: -4, marginTop: 2 }}>
+                <Text className="text-yellow-400 text-sm">{userStreak.current_len} day streak</Text>
+                <Feather name="gift" size={16} color="#93C5FD" />
+                <Text className="text-blue-300 text-sm ml-1">{userStreak.freeze_tokens} tokens</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -858,6 +858,7 @@ export default function SprintsTab() {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
+              ref={refs.recentSprintsTabRef}
               onPress={() => setActiveTab('history')}
               className={`flex-1 py-3 px-4 rounded-lg ${
                 activeTab === 'history' ? 'bg-blue-500' : 'bg-transparent'
