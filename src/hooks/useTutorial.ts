@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Dimensions } from 'react-native';
 import { useTabRefs } from '../app/(tabs)/_layout';
+import { router } from 'expo-router';
 
 const TUTORIAL_KEY = 'tutorial_completed';
 
@@ -15,6 +16,7 @@ export interface TutorialStep {
   placement?: 'top' | 'bottom' | 'center';
   customHighlight?: boolean;
   requiresInteraction?: boolean;
+  action?: () => void;
 }
 
 export function useTutorial() {
@@ -97,6 +99,10 @@ export function useTutorial() {
       placement: 'bottom',
       highlightPadding: 12,
       requiresInteraction: true,
+      action: () => {
+        // Navigate to create sprint page - this demonstrates the actual functionality
+        router.push('/(pages)/create-sprint?fromTutorial=true');
+      },
     },
     {
       id: 'active-sprints',
@@ -106,6 +112,20 @@ export function useTutorial() {
       placement: 'bottom',
       highlightPadding: 8,
       requiresInteraction: true,
+      action: () => {
+        // Programmatically trigger the tab press
+        if (recentSprintsTabRef.current) {
+          // Use measure to trigger a touch event on the element
+          try {
+            const element = recentSprintsTabRef.current as any;
+            if (element._touchableNode && element._touchableNode.props && element._touchableNode.props.onPress) {
+              element._touchableNode.props.onPress();
+            }
+          } catch (error) {
+            console.log('Could not trigger tab press automatically');
+          }
+        }
+      },
     },
     {
       id: 'circles',
@@ -147,6 +167,10 @@ export function useTutorial() {
       placement: 'bottom',
       highlightPadding: 12,
       requiresInteraction: true,
+      action: () => {
+        // Navigate to create sprint page to actually start their journey
+        router.push('/(pages)/create-sprint?fromTutorial=complete');
+      },
     },
   ];
 

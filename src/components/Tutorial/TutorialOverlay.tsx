@@ -16,6 +16,7 @@ interface TutorialStep {
   placement?: 'top' | 'bottom' | 'center';
   customHighlight?: boolean;
   requiresInteraction?: boolean;
+  action?: () => void;
 }
 
 interface TutorialOverlayProps {
@@ -251,7 +252,20 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
   const handleInteraction = () => {
     // Handle interaction with highlighted element
     if (steps[currentStep]?.requiresInteraction) {
-      handleNext();
+      const currentStepData = steps[currentStep];
+      
+      // Execute the action if it exists
+      if (currentStepData.action) {
+        currentStepData.action();
+      }
+      
+      // If this is the last step with an action, complete the tutorial
+      if (currentStep === steps.length - 1) {
+        completeTutorial();
+      } else {
+        // Otherwise advance to next step
+        handleNext();
+      }
     }
   };
 
