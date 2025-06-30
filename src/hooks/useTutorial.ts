@@ -14,6 +14,7 @@ export interface TutorialStep {
   highlightPadding?: number;
   placement?: 'top' | 'bottom' | 'center';
   customHighlight?: boolean;
+  requiresInteraction?: boolean;
 }
 
 export function useTutorial() {
@@ -91,18 +92,20 @@ export function useTutorial() {
     {
       id: 'start-sprint',
       title: 'Start Your First Sprint 🚀',
-      description: 'Sprints are timed study sessions. Tap here to create your first sprint and start studying with friends!',
+      description: 'Sprints are timed study sessions. Tap the highlighted circle to create your first sprint and start studying with friends!',
       targetRef: startSprintRef,
       placement: 'bottom',
       highlightPadding: 12,
+      requiresInteraction: true,
     },
     {
       id: 'active-sprints',
       title: 'Active Sprints Feed 📚',
-      description: 'See what others in your circles are studying right now. Tap "Recent Sprints" to view active and completed sprints.',
+      description: 'See what others in your circles are studying right now. Tap the highlighted "Recent Sprints" tab to continue.',
       targetRef: recentSprintsTabRef,
       placement: 'bottom',
       highlightPadding: 8,
+      requiresInteraction: true,
     },
     {
       id: 'circles',
@@ -139,10 +142,11 @@ export function useTutorial() {
     {
       id: 'ready',
       title: 'You\'re All Set! 🎯',
-      description: 'Time to create your first sprint and start building great study habits. Let\'s go!',
+      description: 'Time to create your first sprint and start building great study habits. Tap the highlighted circle to get started!',
       targetRef: startSprintRef,
       placement: 'bottom',
       highlightPadding: 12,
+      requiresInteraction: true,
     },
   ];
 

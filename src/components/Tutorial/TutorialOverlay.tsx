@@ -15,6 +15,7 @@ interface TutorialStep {
   highlightPadding?: number;
   placement?: 'top' | 'bottom' | 'center';
   customHighlight?: boolean;
+  requiresInteraction?: boolean;
 }
 
 interface TutorialOverlayProps {
@@ -247,6 +248,13 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
     }
   };
 
+  const handleInteraction = () => {
+    // Handle interaction with highlighted element
+    if (steps[currentStep]?.requiresInteraction) {
+      handleNext();
+    }
+  };
+
   const handlePrevious = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
@@ -396,6 +404,22 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                   opacity: pulseAnim,
                 }}
               />
+              
+              {/* Interactive touchable area - rendered on top of all highlight effects */}
+              {step.requiresInteraction && (
+                <TouchableOpacity
+                  style={{
+                    position: 'absolute',
+                    left: targetMeasurements.x - (step.highlightPadding || 12),
+                    top: targetMeasurements.y - (step.highlightPadding || 12),
+                    width: targetMeasurements.width + (step.highlightPadding || 12) * 2,
+                    height: targetMeasurements.height + (step.highlightPadding || 12) * 2,
+                    zIndex: 1000,
+                  }}
+                  onPress={handleInteraction}
+                  activeOpacity={0.8}
+                />
+              )}
             </>
           )}
         </Animated.View>
@@ -461,15 +485,23 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                   <Text className="text-blue-500 text-base">Previous</Text>
                 </TouchableOpacity>
                 
-                {/* Next/Action button */}
-                <TouchableOpacity
-                  onPress={handleNext}
-                  className="px-6 py-2.5 bg-blue-500 rounded-full"
-                >
-                  <Text className="text-white text-base font-medium">
-                    {isLastStep ? 'Get Started' : 'Continue'}
-                  </Text>
-                </TouchableOpacity>
+                {/* Next/Action button - hidden for interactive steps */}
+                {!step.requiresInteraction ? (
+                  <TouchableOpacity
+                    onPress={handleNext}
+                    className="px-6 py-2.5 bg-blue-500 rounded-full"
+                  >
+                    <Text className="text-white text-base font-medium">
+                      {isLastStep ? 'Get Started' : 'Continue'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View className="px-6 py-2.5">
+                    <Text className="text-blue-500 text-base font-medium">
+                      👆 Tap highlighted area
+                    </Text>
+                  </View>
+                )}
                 
                 {/* Placeholder for right side */}
                 <View className={`px-4 py-2 ${currentStep === 0 ? '' : 'opacity-0'}`}>
@@ -480,7 +512,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
               {/* Tap highlighted area text - only show when there's a highlight */}
               {measurementsReady && targetMeasurements && !step.customHighlight && (
                 <Text className="text-gray-400 text-sm text-center mt-3">
-                  Tap highlighted area
+                  {step.requiresInteraction ? 'Tap the highlighted area to continue' : 'Tap highlighted area'}
                 </Text>
               )}
             </View>
