@@ -29,12 +29,12 @@ export default function SearchFriendsPage() {
       
       const { data: pendingRequests } = await supabase
         .from('friend_requests')
-        .select('to_user_id')
-        .eq('from_user_id', user.id)
+        .select('to_id')
+        .eq('from_id', user.id)
         .eq('status', 'pending');
       
       const friendIds = friends?.map(f => f.friend_id) || [];
-      const pendingIds = pendingRequests?.map(r => r.to_user_id) || [];
+      const pendingIds = pendingRequests?.map(r => r.to_id) || [];
       const excludeIds = [...friendIds, ...pendingIds, user.id];
       
       // Search for users
@@ -63,8 +63,8 @@ export default function SearchFriendsPage() {
       const { error } = await supabase
         .from('friend_requests')
         .insert({
-          from_user_id: user.id,
-          to_user_id: toUserId,
+          from_id: user.id,
+          to_id: toUserId,
           status: 'pending'
         });
       
