@@ -12,6 +12,8 @@ import { Feather } from '@expo/vector-icons';
 import SprintCamera from '../../components/SprintCamera';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
+import TutorialOverlay from '../../components/Tutorial/TutorialOverlay';
+import { useTutorial } from '../../hooks/useTutorial';
 
 interface Sprint {
   id: string;
@@ -50,6 +52,9 @@ export default function SprintsTab() {
   const [endingSprintId, setEndingSprintId] = useState<string>('');
   const [userStreak, setUserStreak] = useState<{ current_len: number; freeze_tokens: number }>({ current_len: 0, freeze_tokens: 0 });
   const [activeTab, setActiveTab] = useState<'start' | 'history'>('start');
+  
+  // Tutorial integration
+  const { showTutorial, tutorialSteps, completeTutorial, refs } = useTutorial();
 
   const params = useLocalSearchParams<{
     viewSprint?: string;
@@ -683,6 +688,7 @@ export default function SprintsTab() {
 
   const renderCircle = ({ item }: { item: Circle }) => (
     <TouchableOpacity 
+      ref={item.name === 'Welcome Circle 👋' ? refs.startSprintRef : undefined}
       onPress={() => navigateToCreateSprint(item.id)}
       className="bg-gray-800 rounded-xl p-6 mb-4 mx-4 shadow-lg"
       activeOpacity={0.7}
@@ -824,7 +830,7 @@ export default function SprintsTab() {
         <View className="p-4 border-b border-gray-800">
           <Text className="text-white text-2xl font-bold">Study Sprints</Text>
           <Text className="text-gray-400 text-sm">Focus together with your circles</Text>
-          <View className="flex-row items-center mt-1 space-x-4">
+          <View className="flex-row items-center mt-1 space-x-4" ref={refs.streakRef}>
             <View className="flex-row items-center">
               <Feather name="zap" size={16} color="#FBBF24" />
               <Text className="text-yellow-400 text-sm ml-1">{userStreak.current_len} day streak</Text>
@@ -884,6 +890,7 @@ export default function SprintsTab() {
                 refreshing={refreshing}
               >
                 <FlatList
+                  ref={refs.circlesRef}
                   data={myCircles}
                   renderItem={renderCircle}
                   keyExtractor={(item) => item.id}
@@ -931,6 +938,7 @@ export default function SprintsTab() {
                 refreshing={refreshing}
               >
                 <FlatList
+                  ref={refs.sprintListRef}
                   data={recentSprints}
                   renderItem={renderSprint}
                   keyExtractor={(item) => item.id}
@@ -965,6 +973,13 @@ export default function SprintsTab() {
           />
         </View>
       )}
+      
+      {/* Tutorial Overlay */}
+      <TutorialOverlay
+        steps={tutorialSteps}
+        onComplete={completeTutorial}
+        isVisible={showTutorial}
+      />
     </SafeAreaView>
     </GestureHandlerRootView>
   );

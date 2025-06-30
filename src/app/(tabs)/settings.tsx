@@ -10,9 +10,11 @@ import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
 import Colors from '../../../constants/Colors';
 import * as SecureStore from 'expo-secure-store';
+import { useTutorial } from '../../hooks/useTutorial';
 
 export default function SettingsTab() {
   const { signOut, profile, refreshProfile } = useAuth();
+  const { resetTutorial } = useTutorial();
   const [uploading, setUploading] = useState(false);
   const [privacySettings, setPrivacySettings] = useState({
     is_private: false,
@@ -340,6 +342,40 @@ export default function SettingsTab() {
               />
             </View>
           </View>
+        </View>
+
+        {/* App Settings */}
+        <View className="p-4 border-b border-gray-800">
+          <Text className="text-white text-lg font-bold mb-4">App Settings</Text>
+          
+          <TouchableOpacity 
+            onPress={() => {
+              Alert.alert(
+                'Reset Tutorial',
+                'Would you like to see the app tutorial again?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { 
+                    text: 'Reset', 
+                    onPress: async () => {
+                      await resetTutorial();
+                      Alert.alert('Success', 'Tutorial reset! It will show when you return to the Sprints tab.');
+                    }
+                  }
+                ]
+              );
+            }}
+            className="flex-row items-center justify-between p-4 bg-gray-800 rounded-lg"
+          >
+            <View className="flex-row items-center flex-1">
+              <Feather name="help-circle" size={20} color="white" style={{ marginRight: 12 }} />
+              <View className="flex-1">
+                <Text className="text-white font-medium">Tutorial</Text>
+                <Text className="text-gray-400 text-sm">View the app walkthrough again</Text>
+              </View>
+            </View>
+            <Feather name="chevron-right" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
 
         {/* Sign Out */}

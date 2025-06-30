@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.SprintLoop'
+    namespace 'com.sprintloop.app'
     defaultConfig {
-        applicationId 'com.anonymous.SprintLoop'
+        applicationId 'com.sprintloop.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
