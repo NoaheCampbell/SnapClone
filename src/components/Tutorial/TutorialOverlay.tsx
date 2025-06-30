@@ -217,7 +217,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                 width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 24,
                 height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 24,
                 borderRadius: 16,
-                backgroundColor: '#3B82F6',
+                backgroundColor: NEON_GREEN,
                 opacity: pulseAnim.interpolate({
                   inputRange: [0.3, 0.8],
                   outputRange: [0.2, 0.4],
@@ -235,7 +235,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                 width: targetMeasurements.width + (step.highlightPadding || 12) * 2 + 16,
                 height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 16,
                 borderRadius: 12,
-                backgroundColor: '#3B82F6',
+                backgroundColor: NEON_GREEN,
                 opacity: 0.3,
               }}
             />
@@ -250,7 +250,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                 height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
                 borderRadius: 8,
                 borderWidth: 3,
-                borderColor: '#3B82F6',
+                borderColor: NEON_GREEN,
                 backgroundColor: 'transparent',
               }}
             />
@@ -265,7 +265,7 @@ export default function TutorialOverlay({ steps, onComplete, isVisible }: Tutori
                 height: targetMeasurements.height + (step.highlightPadding || 12) * 2 + 8,
                 borderRadius: 8,
                 borderWidth: 2,
-                borderColor: '#3B82F6',
+                borderColor: NEON_GREEN,
                 backgroundColor: 'transparent',
                 opacity: pulseAnim,
               }}
